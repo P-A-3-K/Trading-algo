@@ -17,6 +17,9 @@ SPY closed at $43.94 on its first day (1993), but its *adjusted* close for that 
 The difference is 30+ years of dividends folded back into the price. Backtest on raw close and
 you silently throw away the dividends, so buy-and-hold looks worse than it really was.
 Splits are worse: a 2-for-1 split looks like a 50% crash in one day.
+Careful: Yahoo's `Close` column is already split-adjusted, just not dividend-adjusted.
+Only `Adj Close` handles both. (AAPL really traded near $499 before its 2020 4-for-1 split;
+Yahoo's `Close` shows about $125.)
 **Rule: always compute returns from adjusted close.**
 
 ## Terms of use (read this)

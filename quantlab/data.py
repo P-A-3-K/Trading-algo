@@ -23,7 +23,11 @@ def synthetic_prices(n_days=2520, start_price=100.0, annual_drift=0.07,
     return pd.Series(prices, index=dates, name="close")
 
 
-def load_csv(path, date_col="Date", price_col="Close"):
-    """Load a CSV of daily prices (e.g. downloaded from Yahoo Finance)."""
+def load_csv(path, date_col="Date", price_col="Adj Close"):
+    """Load a CSV of daily prices, e.g. one saved by quantlab.download.
+
+    Defaults to "Adj Close" (dividends and splits folded in), which is
+    what returns should be computed from.
+    """
     df = pd.read_csv(path, parse_dates=[date_col], index_col=date_col)
     return df[price_col].sort_index().rename("close")
