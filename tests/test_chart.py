@@ -31,3 +31,21 @@ def test_render_fills_template():
     assert "LightweightCharts" in html                  # library inlined
     data = json.loads(html.split("const DATA = ")[1].split(";\n")[0])
     assert data["ticker"] == "SPY" and len(data["bars"]) == 2
+
+
+def test_plots_in_payload():
+    from quantlab.strategy import Plot
+    values = pd.Series([float("nan"), 7.25], index=DF.index)
+    html = chart.render("spy", DF, plots=[Plot("SMA 2", values), Plot("Z", values, "lower")],
+                        strategy="SmaCrossover(fast=2)")
+    data = json.loads(html.split("const DATA = ")[1].split(";\n")[0])
+    assert data["strategy"] == "SmaCrossover(fast=2)"
+    assert data["plots"][0] == {"name": "SMA 2", "pane": "price", "color": None,
+                                "points": [{"time": "2024-01-03", "value": 7.25}]}  # NaN skipped
+    assert data["plots"][1]["pane"] == "lower"
+
+
+def test_cli_args():
+    from quantlab.strategies import SmaCrossover
+    ticker, s = chart._parse_args(["QQQ", "smacrossover", "fast=20"])
+    assert ticker == "QQQ" and isinstance(s, SmaCrossover) and s.fast == 20

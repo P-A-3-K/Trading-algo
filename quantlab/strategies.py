@@ -48,6 +48,7 @@ class MeanReversion(Strategy):
         z = (bars.close - mean) / std
         self.plot(f"SMA {self.lookback}", mean)
         self.plot("Z-score", z, pane="lower")
+        self.plot("Entry level", pd.Series(-self.entry, index=bars.index), pane="lower")
         return (z < -self.entry).astype(float)
 
 

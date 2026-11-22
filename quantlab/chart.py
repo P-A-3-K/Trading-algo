@@ -1,6 +1,7 @@
 """Candlestick charts: turn a ticker's saved prices into an interactive page.
 
-    python -m quantlab.chart SPY          -> reports/SPY.html (open in a browser)
+    python -m quantlab.chart SPY                         -> reports/SPY.html
+    python -m quantlab.chart SPY SmaCrossover fast=20    -> candles + the strategy's lines
 
 The page is self-contained: the chart library (TradingView Lightweight
 Charts, Apache-2.0) and the price data are written into the file, so it
@@ -43,12 +44,30 @@ def candles(df: pd.DataFrame, adjusted: bool = True) -> list:
     ]
 
 
-def render(ticker: str, df: pd.DataFrame, adjusted: bool = True) -> str:
-    """Build the HTML page for one ticker."""
+def line_points(values: pd.Series) -> list:
+    """A plot's values as chart points; gaps (NaN, e.g. warm-up days) are skipped."""
+    values = values.dropna()
+    return [{"time": d.strftime("%Y-%m-%d"), "value": round(float(v), 6)}
+            for d, v in zip(values.index, values.values)]
+
+
+def plots_payload(plots: list) -> list:
+    """Strategy plots (quantlab.strategy.Plot) in the format the page draws."""
+    return [{"name": p.name, "pane": p.pane, "color": p.color,
+             "points": line_points(p.values)} for p in plots]
+
+
+def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
+           plots: list = None, strategy: str = "") -> str:
+    """Build the HTML page for one ticker, optionally with a strategy's lines.
+
+    When plots are given, df must be on the same price basis as the strategy
+    ran on (adjusted, as from download.load_bars) so the lines sit on the candles.
+    """
     template = (WEB / "candles.html").read_text()
     library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text()
-    payload = {"ticker": ticker.upper(), "adjusted": adjusted,
-               "bars": candles(df, adjusted)}
+    payload = {"ticker": ticker.upper(), "adjusted": adjusted, "strategy": strategy,
+               "bars": candles(df, adjusted), "plots": plots_payload(plots or [])}
     return (template
             .replace("__TICKER__", ticker.upper())
             .replace("/*__LIBRARY__*/", library)
@@ -64,16 +83,35 @@ PAGE = """<!doctype html>
 """
 
 
-def save(ticker: str, adjusted: bool = True, out_dir: Path = REPORTS) -> Path:
-    """Write reports/<TICKER>.html (downloads the data first if needed)."""
+def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPORTS) -> Path:
+    """Write reports/<TICKER>[_<Strategy>].html (downloads the data if needed)."""
     df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
+    plots, label, name = [], "", ticker.upper()
+    if strategy is not None:
+        plots = strategy.run(dl.load_bars(ticker)).plots
+        label, name = repr(strategy), f"{name}_{type(strategy).__name__}"
+        adjusted = True          # strategies run on adjusted bars
     out_dir.mkdir(exist_ok=True)
-    path = out_dir / f"{ticker.upper()}.html"
-    path.write_text(PAGE.format(body=render(ticker, df, adjusted)))
+    path = out_dir / f"{name}.html"
+    path.write_text(PAGE.format(body=render(ticker, df, adjusted, plots, label)))
     return path
+
+
+def _parse_args(argv):
+    """SPY [StrategyName [key=value ...]]"""
+    from .strategies import BUILTIN
+    ticker, strategy = (argv[0] if argv else "SPY"), None
+    if len(argv) > 1:
+        by_name = {cls.__name__.lower(): cls for cls in BUILTIN}
+        cls = by_name.get(argv[1].lower())
+        if cls is None:
+            raise SystemExit(f"Unknown strategy {argv[1]!r}. Choose from: "
+                             + ", ".join(c.__name__ for c in BUILTIN))
+        settings = dict(a.split("=", 1) for a in argv[2:])
+        strategy = cls(**settings)
+    return ticker, strategy
 
 
 if __name__ == "__main__":
     import sys
-    for t in sys.argv[1:] or ["SPY"]:
-        print(save(t))
+    print(save(*_parse_args(sys.argv[1:])))

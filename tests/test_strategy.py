@@ -40,7 +40,7 @@ def test_run_returns_positions_and_plots():
     assert res.positions.isin([0.0, 1.0]).all()           # warm-up NaN -> 0
     assert [p.name for p in res.plots] == ["SMA 10", "SMA 30"]
     lower = MeanReversion().run(bars()).plots
-    assert [p.pane for p in lower] == ["price", "lower"]
+    assert [p.pane for p in lower] == ["price", "lower", "lower"]
 
 
 def test_run_resets_plots_between_runs():
