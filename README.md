@@ -26,6 +26,7 @@ pytest -q
 | `quantlab/data.py` | Prices, returns, random walks (synthetic data = a "no edge" control group) |
 | `quantlab/strategy.py` | The Strategy plug-in class: name, settings, `compute()` -> positions, `plot()` lines; look-ahead detector |
 | `quantlab/strategies.py` | Built-in strategies: buy & hold, SMA crossover, mean reversion |
+| `strategies/` | **Your strategies.** Any `Strategy` class in a `.py` file here appears in the app automatically (`quantlab/discovery.py`) |
 | `quantlab/backtest.py` | Simulation, `shift(1)` against look-ahead bias, transaction costs |
 | `quantlab/metrics.py` | CAGR, volatility, Sharpe, max drawdown |
 

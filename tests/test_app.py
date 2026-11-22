@@ -52,7 +52,8 @@ def test_plain_candles(server):
 def test_api_lists(server):
     assert json.loads(get(server + "/api/tickers")[1]) == {"tickers": ["TEST"]}
     ids = [s["id"] for s in json.loads(get(server + "/api/strategies")[1])["strategies"]]
-    assert ids == ["BuyAndHold", "SmaCrossover", "MeanReversion"]
+    assert ids[:3] == ["BuyAndHold", "SmaCrossover", "MeanReversion"]
+    assert "Breakout" in ids                  # discovered from strategies/
 
 
 @pytest.mark.parametrize("query,message", [

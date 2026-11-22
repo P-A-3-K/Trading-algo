@@ -97,6 +97,10 @@ td.sep, th.sep { border-left: 1px solid var(--line); }
 .more { margin-top: 10px; }
 .notice { color: var(--muted); font-size: 13px; }
 [hidden] { display: none !important; }
+.notice-box { border: 1px solid var(--line); border-left: 4px solid var(--down); border-radius: 8px; background: var(--panel);
+  padding: 10px 14px; font-size: 13px; }
+.notice-box ul { margin: 6px 0 0; padding-left: 18px; }
+.notice-box code { font-family: var(--mono); }
 footer { color: var(--muted); font-size: 12px; }
 </style>
 
@@ -112,6 +116,7 @@ footer { color: var(--muted); font-size: 12px; }
     <input type="hidden" name="run" value="1">
   </form>
 
+  <div class="notice-box" id="stratNotice" role="status" hidden></div>
   <section class="card" aria-labelledby="setupTitle">
     <h1 id="setupTitle">Parameter sweep <small id="stratName"></small></h1>
     <p class="desc">Backtest every combination of the settings below. The first part of history picks the winners
@@ -162,12 +167,33 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const A = DATA.app, S = A.strategies.find(s => s.id === A.strategy) || A.strategies[0];
 const params = Object.entries(S.params);
 
+
+// Strategy menu: built-ins, then files from strategies/ (blocked ones can't be picked)
+function strategyOptions(list) {
+  const opt = s => `<option value="${esc(s.id)}"${s.problem ? " disabled" : ""} title="${esc(s.problem ? "Blocked: " + s.problem : s.file || "Built-in")}">` +
+    `${esc(s.name)}${s.problem ? " ⚠ blocked" : ""}</option>`;
+  const mine = list.filter(s => s.source === "user");
+  return `<optgroup label="Built-in">${list.filter(s => s.source !== "user").map(opt).join("")}</optgroup>` +
+    (mine.length ? `<optgroup label="Your strategies (strategies/ folder)">${mine.map(opt).join("")}</optgroup>` : "");
+}
+// A notice when a strategy file couldn't be loaded or a strategy is blocked
+function strategyNotice(app) {
+  const items = app.errors.map(e => `<li><code>${esc(e.file)}</code> didn't load: ${esc(e.error)}</li>`)
+    .concat(app.strategies.filter(s => s.problem).map(s =>
+      `<li><code>${esc(s.file)}</code>: <b>${esc(s.name)}</b> is blocked because ${esc(s.problem)}.</li>`));
+  const el = document.getElementById("stratNotice");
+  if (!items.length) { el.hidden = true; return; }
+  el.innerHTML = `<b>Strategy file problems</b> (fix the file and reload the page)<ul>${items.join("")}</ul>`;
+  el.hidden = false;
+}
+
 // ---- Controls --------------------------------------------------------------------
 const tIn = document.getElementById("tickerIn"), sIn = document.getElementById("stratIn");
 tIn.value = DATA.ticker;
 document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
 const sweepable = A.strategies.filter(s => Object.keys(s.params).length);
-sIn.innerHTML = sweepable.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+sIn.innerHTML = strategyOptions(sweepable);
+strategyNotice(A);
 sIn.value = S.id;
 sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&strategy=${sIn.value}`; });
 tIn.addEventListener("input", () => { tIn.value = tIn.value.toUpperCase(); });

@@ -56,12 +56,28 @@ BUILTIN = [BuyAndHold, SmaCrossover, MeanReversion]
 
 
 def available() -> dict:
-    """All strategies the app can run, by class name."""
-    return {cls.__name__: cls for cls in BUILTIN}
+    """Every strategy that can run: the built-ins plus strategies/*.py files
+    (see quantlab/discovery.py). Blocked ones are left out."""
+    from . import discovery
+    found = discovery.scan(builtin={c.__name__ for c in BUILTIN})
+    out = {cls.__name__: cls for cls in BUILTIN}
+    out.update({sid: f.cls for sid, f in found.strategies.items() if not f.problem})
+    return out
+
+
+def catalog():
+    """For the app's menus: (built-in classes, discovery Scan with files and problems)."""
+    from . import discovery
+    return BUILTIN, discovery.scan(builtin={c.__name__ for c in BUILTIN})
 
 
 def get(name: str):
     """Find a strategy class by name (case-insensitive)."""
+    from . import discovery
+    builtin, found = catalog()
+    for sid, f in found.strategies.items():
+        if sid.lower() == str(name).lower() and f.problem:
+            raise ValueError(f"{sid} ({f.file}) is blocked: {f.problem}.")
     by_lower = {k.lower(): v for k, v in available().items()}
     cls = by_lower.get(str(name).lower())
     if cls is None:

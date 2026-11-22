@@ -85,7 +85,7 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
   border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
 .appbar input { width: 8.5em; text-transform: uppercase; }
 .params { display: contents; }
-.params .field span { max-width: 13em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.params .field span { max-width: 17em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appbar .param input { width: 7em; text-transform: none; }
 .param.changed input { border-color: var(--accent); }
 .appbar input:invalid { border-color: var(--down); }
@@ -93,6 +93,10 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .appbar input:focus-visible, .appbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .appbar button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; font-size: 13px; }
 .appbar button.run:disabled { opacity: .7; cursor: progress; }
+.notice-box { border: 1px solid var(--line); border-left: 4px solid var(--down); border-radius: 8px; background: var(--panel);
+  padding: 10px 14px; font-size: 13px; }
+.notice-box ul { margin: 6px 0 0; padding-left: 18px; }
+.notice-box code { font-family: var(--mono); }
 .navlink { align-self: center; font: 500 13px/1 var(--mono); color: var(--accent); }
 .desc { flex: 1 1 260px; min-width: 0; align-self: center; color: var(--muted); font-size: 13px; }
 footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
@@ -114,6 +118,7 @@ footer a { color: inherit; }
     <a class="navlink" id="optLink" href="/optimize" title="Try every combination of this strategy's settings">Optimize →</a>
     <span class="desc" id="stratDesc"></span>
   </form>
+  <div class="notice-box" id="stratNotice" role="status" hidden></div>
   <header>
     <div class="id">
       <h1 id="ticker">__TICKER__</h1>
@@ -385,6 +390,26 @@ if (DATA.equity) {
   eq.timeScale().setVisibleLogicalRange(chart.timeScale().getVisibleLogicalRange());
 }
 
+
+// Strategy menu: built-ins, then files from strategies/ (blocked ones can't be picked)
+function strategyOptions(list) {
+  const opt = s => `<option value="${esc(s.id)}"${s.problem ? " disabled" : ""} title="${esc(s.problem ? "Blocked: " + s.problem : s.file || "Built-in")}">` +
+    `${esc(s.name)}${s.problem ? " ⚠ blocked" : ""}</option>`;
+  const mine = list.filter(s => s.source === "user");
+  return `<optgroup label="Built-in">${list.filter(s => s.source !== "user").map(opt).join("")}</optgroup>` +
+    (mine.length ? `<optgroup label="Your strategies (strategies/ folder)">${mine.map(opt).join("")}</optgroup>` : "");
+}
+// A notice when a strategy file couldn't be loaded or a strategy is blocked
+function strategyNotice(app) {
+  const items = app.errors.map(e => `<li><code>${esc(e.file)}</code> didn't load: ${esc(e.error)}</li>`)
+    .concat(app.strategies.filter(s => s.problem).map(s =>
+      `<li><code>${esc(s.file)}</code>: <b>${esc(s.name)}</b> is blocked because ${esc(s.problem)}.</li>`));
+  const el = document.getElementById("stratNotice");
+  if (!items.length) { el.hidden = true; return; }
+  el.innerHTML = `<b>Strategy file problems</b> (fix the file and reload the page)<ul>${items.join("")}</ul>`;
+  el.hidden = false;
+}
+
 // ---- App controls (only when served by quantlab.app) -------------------------
 if (DATA.app) {
   const A = DATA.app, form = document.getElementById("appbar");
@@ -394,8 +419,8 @@ if (DATA.app) {
   tIn.value = DATA.ticker;
   document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
   const byId = Object.fromEntries(A.strategies.map(s => [s.id, s]));
-  sIn.innerHTML = `<option value="none">None (candles only)</option>` +
-    A.strategies.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  sIn.innerHTML = `<option value="none">None (candles only)</option>` + strategyOptions(A.strategies);
+  strategyNotice(A);
   sIn.value = A.strategy;
   const describe = () => { desc.textContent = byId[sIn.value]?.description || "Just the price chart, no strategy."; };
   describe();

@@ -104,7 +104,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
     rank = query.get("rank", "sharpe")
     if rank not in RANK_METRICS:
         rank = "sharpe"
-    app = {"strategy": cls.__name__, "strategies": strategies_info(),
+    app = {"strategy": cls.__name__, "strategies": strategies_info(), "errors": strategy_errors(),
            "tickers": dl.cached_tickers(), "ranges": ranges, "split": split,
            "rank": rank, "max_combos": optimize.MAX_COMBINATIONS}
     payload = {"ticker": ticker, "app": app, "result": None}
@@ -136,7 +136,18 @@ def optimize_payload(ticker: str, query: dict) -> dict:
 
 
 def strategies_info() -> list:
-    return [{"id": key, **cls.info()} for key, cls in strategies.available().items()]
+    """Menu entries: built-ins first, then your strategies/ files (with any problem)."""
+    builtin, found = strategies.catalog()
+    out = [{"id": c.__name__, "source": "builtin", "file": "", "problem": "", **c.info()}
+           for c in builtin]
+    out += [{"id": sid, "source": "user", "file": f.file, "problem": f.problem, **f.cls.info()}
+            for sid, f in found.strategies.items()]
+    return out
+
+
+def strategy_errors() -> list:
+    """Files in strategies/ that couldn't be loaded, for a notice in the app."""
+    return [{"file": f, "error": e} for f, e in strategies.catalog()[1].errors]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -171,6 +182,7 @@ class Handler(BaseHTTPRequestHandler):
             "strategy": type(strategy).__name__ if strategy else "none",
             "settings": dict(strategy.settings) if strategy else {},
             "strategies": strategies_info(),
+            "errors": strategy_errors(),
             "tickers": dl.cached_tickers(),
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
@@ -184,7 +196,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send(HTTPStatus.OK, chart.PAGE.format(body=html_page), "text/html; charset=utf-8")
 
     def api_strategies(self, query):
-        self.send_json({"strategies": strategies_info()})
+        self.send_json({"strategies": strategies_info(), "errors": strategy_errors()})
 
     def api_tickers(self, query):
         self.send_json({"tickers": dl.cached_tickers()})
