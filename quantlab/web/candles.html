@@ -58,6 +58,18 @@ h2 small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
   border-radius: 6px; padding: 4px 8px; max-width: 100%; overflow-wrap: anywhere; }
 .strategy[hidden] { display: none; }
 .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.luck { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.luck[hidden] { display: none; }
+.luck-verdict { margin: 0; max-width: 80ch; }
+.luck-verdict b { font-weight: 600; }
+.luck-plot { position: relative; overflow-x: auto; }
+.luck-plot svg { display: block; width: 100%; height: auto; }
+.luck-plot text { fill: var(--muted); font: 11px var(--mono); }
+.luck-plot .lbl { fill: var(--fg); font-weight: 500; }
+.luck-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 12px var(--mono); color: var(--muted); }
+.luck-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+.luck-tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 9px; font: 12px/1.45 var(--mono); color: var(--fg); box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; }
 table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .stats th, .stats td { padding: 9px 14px; text-align: right; border-bottom: 1px solid var(--grid); vertical-align: top; }
 .stats tr:last-child td { border-bottom: 0; }
@@ -155,6 +167,12 @@ footer a { color: inherit; }
         <thead><tr><th scope="col">Statistic</th><th scope="col">Strategy</th><th scope="col">Buy &amp; hold</th></tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+    <div class="luck" id="luckWrap" hidden>
+      <div class="rhead"><h2>Could it be luck? <small id="luckNote"></small></h2></div>
+      <p class="luck-verdict" id="luckVerdict"></p>
+      <div class="luck-plot" id="luckPlot"></div>
+      <div class="luck-legend" id="luckLegend"></div>
     </div>
   </section>
   <footer>
@@ -460,6 +478,86 @@ if (DATA.app) {
   optLink.hidden = !sweepable;
   if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${encodeURIComponent(A.strategy)}`;
   form.hidden = false;
+}
+
+
+// ---- Could it be luck? (block bootstrap) -----------------------------------------
+if (DATA.luck) {
+  const L = DATA.luck, S = L.strategy, B = L.benchmark, H = L.hist;
+  document.getElementById("luckWrap").hidden = false;
+  document.getElementById("luckNote").textContent =
+    `${L.samples.toLocaleString()} reshuffled histories, built from ${L.block}-day blocks of the real ones`;
+  const pctTxt = v => Math.round(v * 100) + "%";
+  const beat = L.beats;
+  const vs = beat >= 0.9 ? "a clear, consistent edge over buy & hold"
+    : beat >= 0.6 ? "better more often than not, but far from certain"
+    : beat >= 0.4 ? "a coin flip: the data can't tell them apart"
+    : beat >= 0.1 ? "usually worse than buy & hold" : "almost always worse than buy & hold";
+  document.getElementById("luckVerdict").innerHTML =
+    `In 90% of reshuffled histories the strategy's Sharpe ratio lands between <b>${S.p5.toFixed(2)}</b> and <b>${S.p95.toFixed(2)}</b> ` +
+    `(actual: ${S.actual.toFixed(2)}), and it's above zero in <b>${pctTxt(S.prob_positive)}</b> of them` +
+    (S.p5 < 0 ? `: the range includes zero, so it may have <b>no real edge</b>` : "") + `. ` +
+    `Against buy & hold on the same reshuffled days it wins in <b>${pctTxt(beat)}</b>: ${vs}.`;
+  const plot = document.getElementById("luckPlot"), legend = document.getElementById("luckLegend");
+  function drawLuck() {
+    // Draw at the real width, so text stays 11px on phones and wide screens alike
+    const W = Math.max(320, Math.round(plot.clientWidth || 800)), Hh = 210, padL = 8, padR = 8, padT = 26, padB = 30;
+    const e = H.edges, nb = H.strategy.length, x0 = e[0], x1 = e[nb];
+    const sx = v => padL + (v - x0) / (x1 - x0) * (W - padL - padR);
+    const total = L.samples, maxc = Math.max(...H.strategy, ...H.benchmark);
+    const sy = c => Hh - padB - c / maxc * (Hh - padT - padB);
+    const acc = css("--accent"), mut = css("--muted");
+    const bw = (W - padL - padR) / nb;
+    let svg = `<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Distribution of Sharpe ratios across reshuffled histories, strategy versus buy and hold">`;
+    svg += `<line x1="${padL}" x2="${W - padR}" y1="${Hh - padB}" y2="${Hh - padB}" stroke="${css("--line")}"></line>`;
+    for (let i = 0; i < nb; i++) {
+      const x = padL + i * bw, half = Math.max(1, bw / 2 - 1);
+      const hb = H.benchmark[i], hs = H.strategy[i];
+      if (hb) svg += `<rect x="${x + 0.5}" y="${sy(hb)}" width="${half}" height="${Hh - padB - sy(hb)}" rx="1.5" fill="${mut}" opacity="0.55"></rect>`;
+      if (hs) svg += `<rect x="${x + half + 1.5}" y="${sy(hs)}" width="${half}" height="${Hh - padB - sy(hs)}" rx="1.5" fill="${acc}"></rect>`;
+      svg += `<rect class="hit" data-i="${i}" x="${x}" y="${padT}" width="${bw}" height="${Hh - padT - padB}" fill="transparent"></rect>`;
+    }
+    const maxTicks = Math.max(3, Math.floor(W / 70));
+    const step = [0.05, 0.1, 0.2, 0.25, 0.5, 1].find(s => (x1 - x0) / s <= maxTicks) || 1;
+    for (let t = Math.ceil(x0 / step) * step; t <= x1 + 1e-9; t += step) {
+      const tx = sx(t);
+      svg += `<line x1="${tx}" x2="${tx}" y1="${Hh - padB}" y2="${Hh - padB + 4}" stroke="${css("--line")}"></line>`;
+      svg += `<text x="${tx}" y="${Hh - padB + 16}" text-anchor="middle">${t.toFixed(step < 0.1 ? 2 : 1)}</text>`;
+    }
+    if (x0 < 0 && x1 > 0) svg += `<line x1="${sx(0)}" x2="${sx(0)}" y1="${padT - 6}" y2="${Hh - padB}" stroke="${css("--down")}" stroke-dasharray="2 3"></line>` +
+      `<text x="${sx(0) + 4}" y="${padT + 4}" fill="${css("--down")}" style="fill:${css("--down")}">no edge</text>`;
+    const mark = (v, color, label, dy, dash) => {
+      if (v < x0 || v > x1) return "";
+      const tx = sx(v), anchor = tx > W - 120 ? "end" : "start", off = anchor === "end" ? -4 : 4;
+      return `<line x1="${tx}" x2="${tx}" y1="${dy - 4}" y2="${Hh - padB}" stroke="${color}" stroke-width="2"${dash ? ' stroke-dasharray="4 3"' : ""}></line>` +
+        `<text class="lbl" x="${tx + off}" y="${dy + 6}" text-anchor="${anchor}">${label}</text>`;
+    };
+    svg += mark(B.actual, mut, `buy & hold ${B.actual.toFixed(2)}`, 12, true);
+    svg += mark(S.actual, acc, `strategy ${S.actual.toFixed(2)}`, 2, false);
+    svg += `<text x="${W / 2}" y="${Hh - 2}" text-anchor="middle">Sharpe ratio →</text></svg>`;
+    plot.innerHTML = svg + `<div class="luck-tip" hidden></div>`;
+    legend.innerHTML = `<span><i style="background:${acc}"></i>Strategy · 90% range ${S.p5.toFixed(2)} to ${S.p95.toFixed(2)}</span>` +
+      `<span><i style="background:${mut};opacity:.55"></i>Buy & hold · 90% range ${B.p5.toFixed(2)} to ${B.p95.toFixed(2)}</span>`;
+    const tip = plot.querySelector(".luck-tip");
+    plot.querySelectorAll("rect.hit").forEach(r => {
+      r.addEventListener("mousemove", ev => {
+        const i = +r.dataset.i, box = plot.getBoundingClientRect();
+        tip.innerHTML = `Sharpe ${e[i].toFixed(2)} to ${e[i + 1].toFixed(2)}<br>Strategy: <b>${(H.strategy[i] / total * 100).toFixed(1)}%</b> of histories<br>Buy & hold: <b>${(H.benchmark[i] / total * 100).toFixed(1)}%</b>`;
+        tip.hidden = false;
+        tip.style.left = Math.min(box.width - tip.offsetWidth - 4, ev.clientX - box.left + 12) + "px";
+        tip.style.top = Math.max(0, ev.clientY - box.top - tip.offsetHeight - 8) + "px";
+      });
+      r.addEventListener("mouseleave", () => { tip.hidden = true; });
+    });
+  }
+  drawLuck();
+  let lastW = plot.clientWidth, resizeTimer;
+  new ResizeObserver(() => {
+    if (Math.abs(plot.clientWidth - lastW) < 8) return;
+    lastW = plot.clientWidth; clearTimeout(resizeTimer); resizeTimer = setTimeout(drawLuck, 120);
+  }).observe(plot);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawLuck);
+  new MutationObserver(drawLuck).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
 // ---- Stats table --------------------------------------------------------------

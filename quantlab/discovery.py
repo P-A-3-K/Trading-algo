@@ -71,7 +71,11 @@ def _load(path: Path, rel: str):
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module                 # dataclasses etc. need it registered
     try:
-        spec.loader.exec_module(module)
+        # Compile straight from the source text, never from __pycache__: Python's
+        # cached .pyc is judged by size + whole-second mtime, so two quick edits of
+        # the same length could otherwise run the OLD code.
+        source = path.read_text(encoding="utf-8")
+        exec(compile(source, str(path), "exec"), module.__dict__)
     except Exception:
         sys.modules.pop(name, None)
         last = traceback.format_exc().strip().splitlines()

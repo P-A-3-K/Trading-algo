@@ -180,6 +180,7 @@ def walk_forward_payload(res, rank: str) -> dict:
         "hindsight_settings": res.hindsight_settings,
         "distinct_settings": len({tuple(sorted(f["settings"].items())) for f in res.folds}),
         "efficiency": clean(eff),
+        "luck": chart.luck_payload(res.returns, res.benchmark),
     }
 
 

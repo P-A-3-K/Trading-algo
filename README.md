@@ -37,6 +37,7 @@ pytest -q
 | `quantlab/download.py` | Download real prices from Yahoo, cache them in `data/` |
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
 | `quantlab/optimize.py` | Parameter sweep: every combination of settings, scored in-sample and out-of-sample; overfitting report; walk-forward (re-optimize each window, trade the next) |
+| `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |
 | `quantlab/chart.py` | Interactive candlestick chart page (TradingView Lightweight Charts, bundled in `quantlab/web/vendor`) |
 | `quantlab/data.py` | Prices, returns, random walks (synthetic data = a "no edge" control group) |

@@ -136,6 +136,17 @@ def stats_payload(strategy: dict, benchmark: dict, start: float = START_CAPITAL)
     return rows
 
 
+def luck_payload(strategy_returns: pd.Series, benchmark_returns: pd.Series,
+                 samples: int = 5000, block: int = 21) -> dict:
+    """Block bootstrap of strategy vs buy & hold, for the 'Could it be luck?' panel."""
+    from .bootstrap import bootstrap, histogram
+    st, be, beat = bootstrap(strategy_returns.to_numpy(), benchmark_returns.to_numpy(),
+                             samples, block)
+    f = lambda d: {k: float(v) for k, v in d.items()}
+    return {"samples": samples, "block": block, "strategy": f(st.summary()),
+            "benchmark": f(be.summary()), "beats": beat, "hist": histogram(st, be)}
+
+
 def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
            plots: list = None, strategy: str = "", fills: pd.DataFrame = None,
            equity: dict = None, stats: list = None) -> str:
@@ -167,7 +178,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
     """
     ticker = dl.clean_ticker(ticker)
     df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
-    plots, fills, equity, stats, label = [], None, None, None, ""
+    plots, fills, equity, stats, luck, label = [], None, None, None, None, ""
     if strategy is not None:
         from .backtest import fills_of, run_backtest, simulate
         from .metrics import full_stats
@@ -179,10 +190,11 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
         equity = equity_payload(strat.returns, bench.returns)
         stats = stats_payload(full_stats(strat.returns, strat.positions, len(fills)),
                               full_stats(bench.returns, bench.positions, 1))
+        luck = luck_payload(strat.returns, bench.returns)
         label, adjusted = repr(strategy), True     # strategies run on adjusted bars
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
-            "trades": trades_payload(fills), "equity": equity, "stats": stats}
+            "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck}
 
 
 def render_payload(payload: dict, page_title: str = None) -> str:

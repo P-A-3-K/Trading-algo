@@ -337,6 +337,7 @@ function drawWalkForward(W) {
       <div class="kpi"><span>Sharpe: walk-forward vs B&H</span><b>${St.wf.sharpe.toFixed(2)} vs ${St.bh.sharpe.toFixed(2)}</b></div>
       <div class="kpi"><span>Kept of in-sample return</span><b>${eff}</b></div>
       <div class="kpi"><span>Different settings chosen</span><b>${W.distinct_settings} of ${W.folds.length} windows</b></div>
+      <div class="kpi"><span>Beats B&H in reshuffled histories</span><b>${Math.round(W.luck.beats * 100)}%</b></div>
     </div>
     <p class="notice">${W.count.toLocaleString()} combinations per window, ${W.folds.length} windows, ${W.seconds.toFixed(1)} s` +
     (W.skipped ? ` · ${W.skipped} skipped (${esc(W.skip_reason)})` : "") +

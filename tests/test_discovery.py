@@ -136,3 +136,12 @@ def test_fvg_strategy_on_hand_made_bars():
     out2 = FairValueGap(rr=0.5, swing=2, risk_pct=10).run(bars)  # target 111 + 8 = 119
     (t2,) = out2.trades
     assert (t2.exit_date, t2.exit_price, t2.exit_reason) == (bars.index[10], 119.0, "target")
+
+
+def test_quick_same_size_edit_is_not_hidden_by_bytecode_cache(folder):
+    """Two edits within the same second, same file length: the new code must run."""
+    p = write(folder, "momentum.py", GOOD)
+    assert discovery.scan(folder).strategies["Momentum"].cls.params["days"].default == 20
+    p.write_text(GOOD.replace("Param(20,", "Param(30,"), encoding="utf-8")
+    discovery._cache.clear()                  # same second: only the source can tell
+    assert discovery.scan(folder).strategies["Momentum"].cls.params["days"].default == 30

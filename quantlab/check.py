@@ -78,6 +78,11 @@ def main(argv=None) -> int:
             print("  note  it never traded with the default settings: check your signal conditions")
         if out.plots:
             print(f"    lines drawn: {', '.join(p.name for p in out.plots)}")
+        from .bootstrap import bootstrap
+        bs, bb, beat = bootstrap(bt.returns.to_numpy(), bh.returns.to_numpy())
+        S = bs.summary()
+        print(f"  luck  in 5,000 reshuffled histories: Sharpe {S['p5']:.2f} to {S['p95']:.2f} "
+              f"(90% range), above 0 in {S['prob_positive']:.0%}, beats buy & hold in {beat:.0%}")
     print("\nAll good: refresh the app to use it." if ok else "\nFix the problems above and run the check again.")
     return 0 if ok else 1
 
