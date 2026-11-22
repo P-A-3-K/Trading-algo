@@ -51,3 +51,33 @@ def backtest(strategy, bars: pd.DataFrame, cost_bps: float = 5.0) -> BacktestRes
     result.plots = out.plots
     result.strategy = repr(strategy)
     return result
+
+
+def trades(positions: pd.Series, prices: pd.Series) -> pd.DataFrame:
+    """Every change of position, as a list of fills.
+
+    Fill timing matches run_backtest: the position decided with day t's close
+    is entered AT day t's close (it starts earning from day t+1). So the fill
+    date is the signal date and the fill price is that day's close.
+
+    side: "buy" (more long), "sell" (less long), "short" (more short),
+          "cover" (less short). A flip from long to short is two rows.
+    """
+    pos = positions.astype(float).fillna(0.0)
+    prev = pos.shift(1).fillna(0.0)
+    rows = []
+    for date in pos.index[pos.ne(prev)]:
+        a, b = prev[date], pos[date]
+        legs = []
+        if a > 0 and b < a:                       # reduce or close a long
+            legs.append(("sell", a, max(b, 0.0)))
+        if a < 0 and b > a:                       # reduce or close a short
+            legs.append(("cover", a, min(b, 0.0)))
+        if b > 0 and b > max(a, 0.0):             # open or add to a long
+            legs.append(("buy", max(a, 0.0), b))
+        if b < 0 and b < min(a, 0.0):             # open or add to a short
+            legs.append(("short", min(a, 0.0), b))
+        for side, frm, to in legs:
+            rows.append({"date": date, "side": side, "from": frm, "to": to,
+                         "price": float(prices[date])})
+    return pd.DataFrame(rows, columns=["date", "side", "from", "to", "price"])

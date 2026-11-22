@@ -73,6 +73,7 @@ footer a { color: inherit; }
       <button type="button" data-months="0">All</button>
       <span class="sep" aria-hidden="true"></span>
       <button type="button" id="log" aria-pressed="false" title="Logarithmic price scale: equal % moves look equal">Log</button>
+      <button type="button" id="tradesBtn" aria-pressed="true" title="Show or hide buy/sell arrows" hidden>Trades</button>
     </div>
   </header>
   <div class="stage">
@@ -124,6 +125,32 @@ if (plots.some(p => p.pane === "lower")) {
   const panes = chart.panes();
   if (panes[1]) panes[1].setHeight(Math.round(document.getElementById("chart").clientHeight * 0.26));
 }
+// Trade markers: arrows at the fill price on the fill day
+const fills = DATA.trades || [];
+const SIDES = { buy: { shape: "arrowUp", pos: "atPriceBottom", token: "--up", label: "Buy" },
+                cover: { shape: "arrowUp", pos: "atPriceBottom", token: "--up", label: "Cover" },
+                sell: { shape: "arrowDown", pos: "atPriceTop", token: "--down", label: "Sell" },
+                short: { shape: "arrowDown", pos: "atPriceTop", token: "--down", label: "Short" } };
+const fillsByTime = new Map();
+fills.forEach(f => { if (!fillsByTime.has(f.time)) fillsByTime.set(f.time, []); fillsByTime.get(f.time).push(f); });
+const markers = LW.createSeriesMarkers(candles, []);
+let showTrades = true;
+function drawMarkers() {
+  markers.setMarkers(!showTrades ? [] : fills.map(f => ({
+    time: f.time, position: SIDES[f.side].pos, price: f.price,
+    shape: SIDES[f.side].shape, color: css(SIDES[f.side].token), size: 2,
+    text: fills.length <= 300 ? SIDES[f.side].label : undefined })));
+}
+const tradesBtn = document.getElementById("tradesBtn");
+if (fills.length) {
+  tradesBtn.hidden = false;
+  tradesBtn.textContent = `Trades (${fills.length.toLocaleString()})`;
+  tradesBtn.addEventListener("click", () => {
+    showTrades = !showTrades;
+    tradesBtn.setAttribute("aria-pressed", String(showTrades));
+    drawMarkers();
+  });
+}
 if (DATA.strategy) {
   const tag = document.getElementById("strategy");
   tag.textContent = DATA.strategy; tag.hidden = false;
@@ -142,6 +169,7 @@ function paint() {
   const vu = css("--vol-up"), vd = css("--vol-down");
   volume.setData(bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? vu : vd })));
   plots.forEach(p => p.series.applyOptions({ color: p.color || css(p.token) }));
+  if (typeof drawMarkers === "function") drawMarkers();
 }
 candles.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
 paint();
@@ -168,6 +196,10 @@ function showBar(b) {
     plots.map(p => {
       const v = p.byTime.get(b.time);
       return `<span><i class="sw" style="background:${p.color || css(p.token)}"></i>${esc(p.name)} <b>${v === undefined ? "–" : fmt(v)}</b></span>`;
+    }).join("") +
+    (fillsByTime.get(b.time) || []).map(f => {
+      const sd = SIDES[f.side], pct = v => Math.round(Math.abs(v) * 100) + "%";
+      return `<span style="color:var(${sd.token})">${sd.shape === "arrowUp" ? "▲" : "▼"} <b style="color:inherit">${sd.label}</b> @ ${fmt(f.price)} (${pct(f.from)} → ${pct(f.to)})</span>`;
     }).join("");
 }
 showBar(last);

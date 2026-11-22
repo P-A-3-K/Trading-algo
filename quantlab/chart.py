@@ -57,8 +57,18 @@ def plots_payload(plots: list) -> list:
              "points": line_points(p.values)} for p in plots]
 
 
+def trades_payload(fills: pd.DataFrame) -> list:
+    """Fills (quantlab.backtest.trades) in the format the page draws as arrows."""
+    if fills is None:
+        return []
+    return [{"time": d.strftime("%Y-%m-%d"), "side": s, "from": float(f), "to": float(t),
+             "price": round(float(p), 4)}
+            for d, s, f, t, p in zip(fills["date"], fills["side"], fills["from"],
+                                     fills["to"], fills["price"])]
+
+
 def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
-           plots: list = None, strategy: str = "") -> str:
+           plots: list = None, strategy: str = "", fills: pd.DataFrame = None) -> str:
     """Build the HTML page for one ticker, optionally with a strategy's lines.
 
     When plots are given, df must be on the same price basis as the strategy
@@ -67,7 +77,8 @@ def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
     template = (WEB / "candles.html").read_text()
     library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text()
     payload = {"ticker": ticker.upper(), "adjusted": adjusted, "strategy": strategy,
-               "bars": candles(df, adjusted), "plots": plots_payload(plots or [])}
+               "bars": candles(df, adjusted), "plots": plots_payload(plots or []),
+               "trades": trades_payload(fills)}
     return (template
             .replace("__TICKER__", ticker.upper())
             .replace("/*__LIBRARY__*/", library)
@@ -86,14 +97,17 @@ PAGE = """<!doctype html>
 def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPORTS) -> Path:
     """Write reports/<TICKER>[_<Strategy>].html (downloads the data if needed)."""
     df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
-    plots, label, name = [], "", ticker.upper()
+    plots, fills, label, name = [], None, "", ticker.upper()
     if strategy is not None:
-        plots = strategy.run(dl.load_bars(ticker)).plots
+        from .backtest import trades
+        bars = dl.load_bars(ticker)
+        out = strategy.run(bars)
+        plots, fills = out.plots, trades(out.positions, bars["close"])
         label, name = repr(strategy), f"{name}_{type(strategy).__name__}"
         adjusted = True          # strategies run on adjusted bars
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"{name}.html"
-    path.write_text(PAGE.format(body=render(ticker, df, adjusted, plots, label)))
+    path.write_text(PAGE.format(body=render(ticker, df, adjusted, plots, label, fills)))
     return path
 
 

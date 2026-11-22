@@ -49,3 +49,12 @@ def test_cli_args():
     from quantlab.strategies import SmaCrossover
     ticker, s = chart._parse_args(["QQQ", "smacrossover", "fast=20"])
     assert ticker == "QQQ" and isinstance(s, SmaCrossover) and s.fast == 20
+
+
+def test_trades_in_payload():
+    from quantlab.backtest import trades
+    pos = pd.Series([0.0, 1.0], index=DF.index)
+    html = chart.render("spy", DF, fills=trades(pos, DF["Adj Close"]))
+    data = json.loads(html.split("const DATA = ")[1].split(";\n")[0])
+    assert data["trades"] == [{"time": "2024-01-03", "side": "buy", "from": 0.0,
+                               "to": 1.0, "price": 5.0}]
