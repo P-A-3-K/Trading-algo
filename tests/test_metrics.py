@@ -14,7 +14,7 @@ def test_longest_drawdown_counts_days_below_peak():
 
 
 def test_sortino_ignores_upside():
-    calm = pd.Series([0.01, -0.01] * 4, index=IDX)
+    calm = pd.Series([0.01, -0.005] * 4, index=IDX)
     spiky_up = pd.Series([0.05, -0.01] * 4, index=IDX)
     assert sortino(spiky_up) > sortino(calm) > 0
 
