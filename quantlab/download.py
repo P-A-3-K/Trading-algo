@@ -42,6 +42,9 @@ def fetch(ticker: str, timeout: float = 30) -> pd.DataFrame:
               "events": "div,split", "includeAdjustedClose": "true"}
     resp = requests.get(URL.format(ticker=clean_ticker(ticker)), params=params,
                         headers=HEADERS, timeout=timeout)
+    if resp.status_code == 404:
+        raise ValueError(f"Yahoo Finance has no data for {ticker!r}. Check the symbol "
+                         "(e.g. BRK-B, not BRK.B; ^GSPC for the S&P 500 index).")
     resp.raise_for_status()
     return parse_chart(resp.json())
 

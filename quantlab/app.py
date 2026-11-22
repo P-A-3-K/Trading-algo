@@ -73,8 +73,15 @@ class Handler(BaseHTTPRequestHandler):
     # ---- routes --------------------------------------------------------------
     def page(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
-        payload = chart.build_payload(ticker, strategy_from_query(query))
-        payload["app"] = {"query": query}
+        strategy = strategy_from_query(query)
+        payload = chart.build_payload(ticker, strategy)
+        # What the control bar needs: menus, and the current choice to pre-select
+        payload["app"] = {
+            "strategy": type(strategy).__name__ if strategy else "none",
+            "settings": dict(strategy.settings) if strategy else {},
+            "strategies": strategies_info(),
+            "tickers": dl.cached_tickers(),
+        }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
                   "text/html; charset=utf-8")
 
@@ -131,7 +138,7 @@ main {{ max-width:640px; margin:10vh auto; padding-inline:max(16px, env(safe-are
 h1 {{ font-size:20px; margin:0 0 8px; }} code {{ font-family:ui-monospace, monospace; }} a {{ color:var(--accent); }}
 </style>
 <main><div class="box"><h1>That didn't work</h1><p><code>{html.escape(message)}</code></p>
-<p><a href="/">Back to SPY with the default strategy</a></p></div></main>""")
+<p><a href="javascript:history.back()">Go back</a> &nbsp;·&nbsp; <a href="/">Start over with SPY</a></p></div></main>""")
 
 
 def make_server(host="127.0.0.1", port=8000) -> ThreadingHTTPServer:

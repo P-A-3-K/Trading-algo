@@ -75,11 +75,37 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
   .stats .why { font-size: 11px; }
 }
 .stats tr.group td { padding-top: 14px; font: 500 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.appbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.appbar[hidden] { display: none; }
+.brand { font: 600 15px/1 var(--sans); letter-spacing: .02em; align-self: center; margin-right: 6px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field span { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.appbar input, .appbar select { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
+.appbar input { width: 8.5em; text-transform: uppercase; }
+.appbar select { max-width: 100%; }
+.appbar input:focus-visible, .appbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.appbar button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; font-size: 13px; }
+.appbar button.run:disabled { opacity: .7; cursor: progress; }
+.desc { flex: 1 1 260px; min-width: 0; align-self: center; color: var(--muted); font-size: 13px; }
 footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
 footer a { color: inherit; }
 </style>
 
 <div class="wrap">
+  <form class="appbar" id="appbar" method="get" action="/" hidden>
+    <span class="brand">QuantLab</span>
+    <label class="field"><span>Ticker</span>
+      <input id="tickerIn" name="ticker" list="tickerList" autocomplete="off" spellcheck="false"
+             maxlength="15" required pattern="[A-Za-z0-9][A-Za-z0-9.\-^=]{0,14}"
+             title="A ticker symbol, e.g. SPY, AAPL, BRK-B, ^GSPC"></label>
+    <datalist id="tickerList"></datalist>
+    <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
+    <span id="settingsIn"></span>
+    <button type="submit" class="run" id="runBtn">Run</button>
+    <span class="desc" id="stratDesc"></span>
+  </form>
   <header>
     <div class="id">
       <h1 id="ticker">__TICKER__</h1>
@@ -349,6 +375,36 @@ if (DATA.equity) {
     else { chart.clearCrosshairPosition(); showBar(last); }
   });
   eq.timeScale().setVisibleLogicalRange(chart.timeScale().getVisibleLogicalRange());
+}
+
+// ---- App controls (only when served by quantlab.app) -------------------------
+if (DATA.app) {
+  const A = DATA.app, form = document.getElementById("appbar");
+  const tIn = document.getElementById("tickerIn"), sIn = document.getElementById("stratIn");
+  const keep = document.getElementById("settingsIn"), run = document.getElementById("runBtn");
+  const desc = document.getElementById("stratDesc");
+  tIn.value = DATA.ticker;
+  document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
+  const byId = Object.fromEntries(A.strategies.map(s => [s.id, s]));
+  sIn.innerHTML = `<option value="none">None (candles only)</option>` +
+    A.strategies.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+  sIn.value = A.strategy;
+  const describe = () => { desc.textContent = byId[sIn.value]?.description || "Just the price chart, no strategy."; };
+  describe();
+  // Keep the current settings when only the ticker changes
+  keep.innerHTML = Object.entries(A.settings).map(([k, v]) =>
+    `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("");
+  sIn.addEventListener("change", () => {      // new strategy: start from its defaults
+    keep.innerHTML = ""; describe(); form.requestSubmit();
+  });
+  tIn.addEventListener("input", () => { tIn.value = tIn.value.toUpperCase(); });
+  form.addEventListener("submit", () => {
+    const t = tIn.value.trim().toUpperCase(); tIn.value = t;
+    run.disabled = true;
+    run.textContent = A.tickers.includes(t) ? "Loading…" : `Downloading ${t}…`;
+  });
+  window.addEventListener("pageshow", () => { run.disabled = false; run.textContent = "Run"; });
+  form.hidden = false;
 }
 
 // ---- Stats table --------------------------------------------------------------

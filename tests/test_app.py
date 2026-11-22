@@ -81,3 +81,23 @@ def test_ticker_validation():
     for bad in ["../x", "a/b", "", "TOO_LONG_TICKER_NAME", "x y"]:
         with pytest.raises(ValueError):
             dl.clean_ticker(bad)
+
+
+def test_page_carries_menu_data(server):
+    body = get(server + "/?ticker=TEST&strategy=MeanReversion&entry=1.5")[1]
+    data = json.loads(body.split("const DATA = ")[1].split(";\n")[0])
+    assert data["app"]["strategy"] == "MeanReversion"
+    assert data["app"]["settings"] == {"lookback": 20, "entry": 1.5}
+    assert data["app"]["tickers"] == ["TEST"]
+    assert [s["id"] for s in data["app"]["strategies"]][0] == "BuyAndHold"
+    plain = get(server + "/?ticker=TEST&strategy=none")[1]
+    assert '"strategy":"none","settings":{}' in plain
+
+
+def test_unknown_ticker_message(monkeypatch):
+    class Resp:
+        status_code = 404
+        def raise_for_status(self): raise AssertionError("should not get here")
+    monkeypatch.setattr(dl.requests, "get", lambda *a, **k: Resp())
+    with pytest.raises(ValueError, match="no data for 'ZZZZQ'"):
+        dl.fetch("ZZZZQ")
