@@ -90,9 +90,45 @@ def equity_payload(strategy_returns: pd.Series, benchmark_returns: pd.Series,
             "strategy_dd": pts(s_dd * 100, 3), "benchmark_dd": pts(b_dd * 100, 3)}
 
 
+# (key, label, explanation, format, which is better)
+STAT_ROWS = [
+    ("final_value", "Final value", "What $10,000 grew to", "money", "higher"),
+    ("cagr", "Return per year", "Compound annual growth (CAGR)", "pct", "higher"),
+    ("volatility", "Volatility", "How much it swings, per year", "pct", "lower"),
+    ("sharpe", "Sharpe ratio", "Return per unit of risk; above 1 is good", "num", "higher"),
+    ("sortino", "Sortino ratio", "Like Sharpe, but only falls count as risk", "num", "higher"),
+    ("max_drawdown", "Worst drawdown", "Biggest fall from a peak", "pct", "higher"),
+    ("longest_drawdown_days", "Longest underwater", "Most time spent below a previous peak", "days", "lower"),
+    ("calmar", "Calmar ratio", "Return per year ÷ worst drawdown", "num", "higher"),
+    ("time_in_market", "Time in market", "Share of days holding a position", "pct", None),
+    ("fills", "Trades", "Buy and sell orders", "int", None),
+    ("win_rate", "Win rate", "Share of round trips that made money", "pct", None),
+    ("avg_win", "Average win", "Mean return of winning round trips", "pct", None),
+    ("avg_loss", "Average loss", "Mean return of losing round trips", "pct", None),
+    ("avg_days_held", "Average hold", "Trading days per round trip", "days", None),
+]
+
+
+def stats_payload(strategy: dict, benchmark: dict, start: float = START_CAPITAL) -> list:
+    """Rows for the stats table: strategy next to buy & hold.
+
+    Trade statistics (win rate etc.) are only shown for the strategy:
+    buy & hold makes one trade, so they mean nothing there.
+    """
+    trade_only = {"win_rate", "avg_win", "avg_loss", "avg_days_held"}
+    rows = []
+    for key, label, note, fmt, better in STAT_ROWS:
+        get = lambda st: start * (1 + st["total_return"]) if key == "final_value" else st.get(key)
+        bench = None if key in trade_only else get(benchmark)
+        val = lambda v: None if v is None or v != v else float(v)   # NaN -> None
+        rows.append({"key": key, "label": label, "note": note, "fmt": fmt, "better": better,
+                     "strategy": val(get(strategy)), "benchmark": val(bench)})
+    return rows
+
+
 def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
            plots: list = None, strategy: str = "", fills: pd.DataFrame = None,
-           equity: dict = None) -> str:
+           equity: dict = None, stats: list = None) -> str:
     """Build the HTML page for one ticker, optionally with a strategy's lines.
 
     When plots are given, df must be on the same price basis as the strategy
@@ -102,7 +138,8 @@ def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
     library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text()
     payload = {"ticker": ticker.upper(), "adjusted": adjusted, "strategy": strategy,
                "bars": candles(df, adjusted), "plots": plots_payload(plots or []),
-               "trades": trades_payload(fills), "equity": equity}
+               "trades": trades_payload(fills), "equity": equity,
+               "stats": stats}
     return (template
             .replace("__TICKER__", ticker.upper())
             .replace("/*__LIBRARY__*/", library)
@@ -121,7 +158,7 @@ PAGE = """<!doctype html>
 def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPORTS) -> Path:
     """Write reports/<TICKER>[_<Strategy>].html (downloads the data if needed)."""
     df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
-    plots, fills, equity, label, name = [], None, None, "", ticker.upper()
+    plots, fills, equity, stats, label, name = [], None, None, None, "", ticker.upper()
     if strategy is not None:
         from .backtest import run_backtest, trades
         bars = dl.load_bars(ticker)
@@ -130,11 +167,14 @@ def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPO
         strat = run_backtest(bars["close"], out.positions)
         bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
         equity = equity_payload(strat.returns, bench.returns)
+        from .metrics import full_stats
+        stats = stats_payload(full_stats(strat.returns, strat.positions, len(fills)),
+                              full_stats(bench.returns, bench.positions, 1))
         label, name = repr(strategy), f"{name}_{type(strategy).__name__}"
         adjusted = True          # strategies run on adjusted bars
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"{name}.html"
-    path.write_text(PAGE.format(body=render(ticker, df, adjusted, plots, label, fills, equity)))
+    path.write_text(PAGE.format(body=render(ticker, df, adjusted, plots, label, fills, equity, stats)))
     return path
 
 

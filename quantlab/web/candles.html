@@ -57,6 +57,24 @@ h2 small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
 .strategy { font: 500 12px/1.3 var(--mono); color: var(--fg); background: var(--grid); border: 1px solid var(--line);
   border-radius: 6px; padding: 4px 8px; max-width: 100%; overflow-wrap: anywhere; }
 .strategy[hidden] { display: none; }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stats th, .stats td { padding: 9px 14px; text-align: right; border-bottom: 1px solid var(--grid); vertical-align: top; }
+.stats tr:last-child td { border-bottom: 0; }
+.stats th { font: 500 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.stats th:first-child, .stats td:first-child { text-align: left; }
+.stats td.num { font: 400 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.stats td.num.win { color: var(--fg); font-weight: 600; }
+.stats td.num.win::before { content: "● "; color: var(--accent); font-size: 9px; vertical-align: 2px; }
+.stats .lbl { font-weight: 500; }
+.stats .why { display: block; color: var(--muted); font-size: 12px; }
+.stats th:not(:first-child) { width: 22%; }
+@media (max-width: 560px) {
+  .stats th, .stats td { padding: 8px 10px; }
+  .stats td.num { font-size: 12px; }
+  .stats .why { font-size: 11px; }
+}
+.stats tr.group td { padding-top: 14px; font: 500 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
 footer a { color: inherit; }
 </style>
@@ -92,6 +110,12 @@ footer a { color: inherit; }
     <div class="stage eq">
       <div class="legend" id="rlegend"></div>
       <div id="equity"></div>
+    </div>
+    <div class="tablewrap" id="statsWrap" hidden>
+      <table class="stats" id="stats">
+        <thead><tr><th scope="col">Statistic</th><th scope="col">Strategy</th><th scope="col">Buy &amp; hold</th></tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
   </section>
   <footer>
@@ -325,6 +349,32 @@ if (DATA.equity) {
     else { chart.clearCrosshairPosition(); showBar(last); }
   });
   eq.timeScale().setVisibleLogicalRange(chart.timeScale().getVisibleLogicalRange());
+}
+
+// ---- Stats table --------------------------------------------------------------
+if (DATA.stats) {
+  const F = {
+    money: v => "$" + Math.round(v).toLocaleString(),
+    pct: v => (v * 100).toFixed(1) + "%",
+    num: v => v.toFixed(2),
+    int: v => Math.round(v).toLocaleString(),
+    days: v => v >= 252 ? (v / 252).toFixed(1) + " yrs" : Math.round(v) + " days",
+  };
+  const show = (v, f) => v === null || v === undefined ? "–" : F[f](v);
+  const tbody = document.querySelector("#stats tbody");
+  const groups = { final_value: "Return", volatility: "Risk", time_in_market: "Trading" };
+  tbody.innerHTML = DATA.stats.map(r => {
+    let sWin = false, bWin = false;
+    if (r.better && r.strategy !== null && r.benchmark !== null && r.strategy !== r.benchmark) {
+      const sBetter = r.better === "higher" ? r.strategy > r.benchmark : r.strategy < r.benchmark;
+      sWin = sBetter; bWin = !sBetter;
+    }
+    const head = groups[r.key] ? `<tr class="group"><td colspan="3">${groups[r.key]}</td></tr>` : "";
+    return head + `<tr><td><span class="lbl">${esc(r.label)}</span><span class="why">${esc(r.note)}</span></td>` +
+      `<td class="num${sWin ? " win" : ""}">${show(r.strategy, r.fmt)}</td>` +
+      `<td class="num${bWin ? " win" : ""}">${show(r.benchmark, r.fmt)}</td></tr>`;
+  }).join("");
+  document.getElementById("statsWrap").hidden = false;
 }
 setRange(12);
 </script>
