@@ -58,3 +58,13 @@ def test_trades_in_payload():
     data = json.loads(html.split("const DATA = ")[1].split(";\n")[0])
     assert data["trades"] == [{"time": "2024-01-03", "side": "buy", "from": 0.0,
                                "to": 1.0, "price": 5.0}]
+
+
+def test_equity_payload():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    strat = pd.Series([0.0, 0.10, -0.05], index=idx)
+    bench = pd.Series([0.0, 0.0, 0.0], index=idx)
+    e = chart.equity_payload(strat, bench)
+    assert [p["value"] for p in e["strategy"]] == [10000.0, 11000.0, 10450.0]
+    assert [p["value"] for p in e["strategy_dd"]] == [0.0, 0.0, -5.0]   # % below peak
+    assert e["benchmark"][-1]["value"] == 10000.0 and e["start"] == 10000

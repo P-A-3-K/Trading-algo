@@ -21,9 +21,8 @@
   --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff;
   --vol-up: rgba(47,191,138,.30); --vol-down: rgba(239,106,97,.30); --l1: #7aa2ff; --l2: #f0a63a; --l3: #b68cf0; --l4: #4cc6d4; color-scheme: dark; }
 
-html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
-.wrap { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 12px;
+.wrap { box-sizing: border-box; display: flex; flex-direction: column; gap: 12px;
   padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1400px; margin: 0 auto; }
 header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
@@ -40,9 +39,15 @@ button:hover { color: var(--fg); }
 button[aria-pressed="true"] { color: var(--panel); background: var(--accent); border-color: var(--accent); }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sep { width: 1px; background: var(--line); margin: 0 4px; }
-.stage { position: relative; flex: 1; min-height: 360px; background: var(--panel);
+.stage { position: relative; height: clamp(380px, 64vh, 780px); background: var(--panel);
   border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-#chart { position: absolute; inset: 0; }
+.stage.eq { height: clamp(300px, 40vh, 440px); }
+#chart, #equity { position: absolute; inset: 0; }
+.results { display: flex; flex-direction: column; gap: 8px; }
+.results[hidden] { display: none; }
+.rhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+h2 { margin: 0; font: 600 16px/1.2 var(--sans); }
+h2 small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
 .legend { position: absolute; top: 8px; left: 8px; z-index: 3; pointer-events: none; padding: 2px 6px; border-radius: 6px;
   background: color-mix(in srgb, var(--panel) 84%, transparent);
   font: 12px/1.5 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted);
@@ -80,6 +85,15 @@ footer a { color: inherit; }
     <div class="legend" id="legend"></div>
     <div id="chart"></div>
   </div>
+  <section class="results" id="results" hidden aria-label="Backtest results">
+    <div class="rhead">
+      <h2>Growth of $10,000 <small>log scale · lower panel: drawdown from peak</small></h2>
+    </div>
+    <div class="stage eq">
+      <div class="legend" id="rlegend"></div>
+      <div id="equity"></div>
+    </div>
+  </section>
   <footer>
     <span id="note">Daily bars. Drag to scroll, scroll wheel or pinch to zoom.</span>
     <span>Charts: TradingView Lightweight Charts™, © 2025 TradingView, Inc. <a href="https://www.tradingview.com/" target="_blank" rel="noopener">tradingview.com</a></span>
@@ -101,10 +115,12 @@ const chart = LW.createChart(document.getElementById("chart"), {
   autoSize: true,
   layout: { fontFamily: css("--mono"), fontSize: 11 },
   rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.24 } },
-  timeScale: { borderVisible: false, rightOffset: 4 },
+  timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02 },
   crosshair: { mode: LW.CrosshairMode.Normal },
 });
-const candles = chart.addSeries(LW.CandlestickSeries, { borderVisible: false, priceLineVisible: false });
+const candles = chart.addSeries(LW.CandlestickSeries, { borderVisible: false, priceLineVisible: false,
+  // the axis runs below zero to leave room for volume bars; prices are never negative, so hide those labels
+  priceFormat: { type: "custom", minMove: 0.01, formatter: v => (v < 0 ? "" : v.toFixed(2)) } });
 const volume = chart.addSeries(LW.HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
 chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
@@ -203,12 +219,13 @@ function showBar(b) {
     }).join("");
 }
 showBar(last);
+const keyOf = t => typeof t === "string" ? t
+  : `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`;
+let eqSync = null;   // set below when there are results to show
 chart.subscribeCrosshairMove(p => {
-  if (p.time && p.seriesData.get(candles)) {
-    const key = typeof p.time === "string" ? p.time
-      : `${p.time.year}-${String(p.time.month).padStart(2, "0")}-${String(p.time.day).padStart(2, "0")}`;
-    showBar(bars[byTime.get(key)] || last);
-  } else showBar(last);
+  const key = p.time ? keyOf(p.time) : null;
+  showBar(key && byTime.has(key) ? bars[byTime.get(key)] : last);
+  if (eqSync && p.sourceEvent) eqSync.follow(key);
 });
 
 // Range buttons and log scale
@@ -228,5 +245,86 @@ logBtn.addEventListener("click", () => {
   logBtn.setAttribute("aria-pressed", String(on));
   chart.priceScale("right").applyOptions({ mode: on ? LW.PriceScaleMode.Logarithmic : LW.PriceScaleMode.Normal });
 });
+
+// ---- Results: growth of $10,000 vs buy & hold, drawdown underneath ----------
+if (DATA.equity) {
+  const E = DATA.equity;
+  document.getElementById("results").hidden = false;
+  const money = v => "$" + (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e4 ? (v / 1e3).toFixed(1) + "K" : Math.round(v).toLocaleString());
+  const pctf = v => (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+  const eq = LW.createChart(document.getElementById("equity"), {
+    autoSize: true, layout: { fontFamily: css("--mono"), fontSize: 11 },
+    rightPriceScale: { borderVisible: false, mode: LW.PriceScaleMode.Logarithmic, scaleMargins: { top: 0.12, bottom: 0.06 } },
+    timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02 },
+    crosshair: { mode: LW.CrosshairMode.Normal },
+  });
+  const bench = eq.addSeries(LW.LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+    priceFormat: { type: "custom", formatter: money } }, 0);
+  const strat = eq.addSeries(LW.LineSeries, { lineWidth: 2, priceLineVisible: false,
+    priceFormat: { type: "custom", formatter: money } }, 0);
+  const bdd = eq.addSeries(LW.LineSeries, { lineWidth: 1, priceLineVisible: false, lastValueVisible: false,
+    priceFormat: { type: "custom", formatter: pctf } }, 1);
+  const sdd = eq.addSeries(LW.BaselineSeries, { baseValue: { type: "price", price: 0 }, lineWidth: 1,
+    priceLineVisible: false, lastValueVisible: false, priceFormat: { type: "custom", formatter: pctf } }, 1);
+  bench.setData(E.benchmark); strat.setData(E.strategy); bdd.setData(E.benchmark_dd); sdd.setData(E.strategy_dd);
+  const panes = eq.panes();
+  if (panes[1]) panes[1].setHeight(Math.round(document.getElementById("equity").clientHeight * 0.34));
+
+  function paintEq() {
+    const down = css("--down");
+    eq.applyOptions({
+      layout: { background: { type: "solid", color: css("--panel") }, textColor: css("--muted"),
+                panes: { separatorColor: css("--line"), separatorHoverColor: css("--grid") } },
+      grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+      crosshair: { vertLine: { color: css("--muted"), labelBackgroundColor: css("--accent") },
+                   horzLine: { color: css("--muted"), labelBackgroundColor: css("--accent") } },
+    });
+    strat.applyOptions({ color: css("--accent") });
+    bench.applyOptions({ color: css("--muted") });
+    bdd.applyOptions({ color: css("--muted") });
+    sdd.applyOptions({ bottomLineColor: down, topLineColor: down,
+      bottomFillColor1: `color-mix(in srgb, ${down} 30%, transparent)`, bottomFillColor2: `color-mix(in srgb, ${down} 8%, transparent)`,
+      topFillColor1: "transparent", topFillColor2: "transparent" });
+  }
+  paintEq();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paintEq);
+  new MutationObserver(paintEq).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  // Legend for the results panel
+  const rlegend = document.getElementById("rlegend");
+  const idx = new Map(E.strategy.map((p, i) => [p.time, i]));
+  function showEq(key) {
+    const i = idx.has(key) ? idx.get(key) : E.strategy.length - 1;
+    const s = E.strategy[i], b = E.benchmark[i];
+    const sw = t => `<i class="sw" style="background:${css(t)}"></i>`;
+    rlegend.innerHTML = `<span><b>${s.time}</b></span>` +
+      `<span>${sw("--accent")}Strategy <b>${money(s.value)}</b> (${pctf((s.value / E.start - 1) * 100)})</span>` +
+      `<span>${sw("--muted")}Buy & hold <b>${money(b.value)}</b> (${pctf((b.value / E.start - 1) * 100)})</span>` +
+      `<span style="color:var(--down)">Drawdown <b style="color:inherit">${E.strategy_dd[i].value.toFixed(1)}%</b> vs ${E.benchmark_dd[i].value.toFixed(1)}%</span>`;
+  }
+  showEq(null);
+
+  // Keep both charts on the same dates: scroll/zoom and crosshair follow each other
+  let syncing = false;
+  const mirror = (from, to) => from.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    if (!r || syncing) return; syncing = true; to.timeScale().setVisibleLogicalRange(r); syncing = false;
+  });
+  mirror(chart, eq); mirror(eq, chart);
+  eqSync = {
+    follow(key) {
+      showEq(key);
+      if (key && idx.has(key)) eq.setCrosshairPosition(E.strategy[idx.get(key)].value, key, strat);
+      else eq.clearCrosshairPosition();
+    },
+  };
+  eq.subscribeCrosshairMove(p => {
+    const key = p.time ? keyOf(p.time) : null;
+    showEq(key);
+    if (!p.sourceEvent) return;
+    if (key && byTime.has(key)) { chart.setCrosshairPosition(bars[byTime.get(key)].close, key, candles); showBar(bars[byTime.get(key)]); }
+    else { chart.clearCrosshairPosition(); showBar(last); }
+  });
+  eq.timeScale().setVisibleLogicalRange(chart.timeScale().getVisibleLogicalRange());
+}
 setRange(12);
 </script>
