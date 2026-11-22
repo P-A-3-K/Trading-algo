@@ -3,8 +3,8 @@
 Each lesson adds one feature to the software and teaches the idea behind it.
 
 ```bash
-python -m quantlab.app                  # the QuantLab web app: http://127.0.0.1:8000
 pip install pandas numpy requests pandas_market_calendars pytest
+python -m quantlab.app                  # the QuantLab web app: http://127.0.0.1:8000
 python lessons/01_first_backtest.py
 python lessons/02_real_data.py          # downloads SPY & AAPL into data/ on first run
 python -m quantlab.download SPY QQQ     # download any tickers
