@@ -110,10 +110,20 @@ def optimize_payload(ticker: str, query: dict) -> dict:
     rank = query.get("rank", "sharpe")
     if rank not in RANK_METRICS:
         rank = "sharpe"
+    mode = "wf" if query.get("mode") == "wf" else "split"
+    wf = {"train": float(query.get("train", 8)), "test": float(query.get("test", 2)),
+          "anchored": query.get("window") == "anchored"}
     app = {"strategy": cls.__name__, "strategies": strategies_info(), "errors": strategy_errors(),
            "tickers": dl.cached_tickers(), "ranges": ranges, "split": split,
-           "rank": rank, "max_combos": optimize.MAX_COMBINATIONS}
+           "rank": rank, "mode": mode, "wf": wf,
+           "max_combos": optimize.WF_MAX_COMBINATIONS if mode == "wf" else optimize.MAX_COMBINATIONS}
     payload = {"ticker": ticker, "app": app, "result": None}
+    if query.get("run") and mode == "wf":
+        bars = dl.load_bars(ticker)
+        res = optimize.walk_forward(bars, cls, {k: tuple(v) for k, v in ranges.items()},
+                                    wf["train"], wf["test"], wf["anchored"], rank)
+        payload["result"] = walk_forward_payload(res, rank)
+        return payload
     if query.get("run"):
         bars = dl.load_bars(ticker)
         res = optimize.sweep(bars, cls, {k: tuple(v) for k, v in ranges.items()}, split)
@@ -139,6 +149,38 @@ def optimize_payload(ticker: str, query: dict) -> dict:
             "split_before": str(idx[split_pos - 1].date()),
         }
     return payload
+
+
+def walk_forward_payload(res, rank: str) -> dict:
+    """Walk-forward result as plain data for the page."""
+    from .metrics import full_stats
+    def curve(r):
+        eq = chart.START_CAPITAL * (1 + r).cumprod()
+        return [{"time": d.strftime("%Y-%m-%d"), "value": round(float(v), 2)}
+                for d, v in zip(eq.index, eq.values)]
+    def stats(r, held=None):
+        st = full_stats(r, held)
+        return {"final": chart.START_CAPITAL * (1 + st["total_return"]), "cagr": st["cagr"],
+                "sharpe": st["sharpe"], "max_dd": st["max_drawdown"],
+                "exposure": st.get("time_in_market")}
+    folds = [{**{k: (str(v.date()) if hasattr(v, "date") else v) for k, v in f.items()
+                 if k != "settings"}, "settings": f["settings"]} for f in res.folds]
+    pos_train = [f["train_cagr"] for f in res.folds]
+    eff = (sum(f["test_cagr"] for f in res.folds) / sum(pos_train)
+           if sum(pos_train) > 0 else None)
+    return {
+        "mode": "wf", "folds": folds, "params": res.params, "rank": rank,
+        "count": res.combos, "skipped": len(res.skipped),
+        "skip_reason": res.skipped[0][1] if res.skipped else "",
+        "seconds": res.seconds, "start": str(res.returns.index[0].date()),
+        "end": str(res.returns.index[-1].date()),
+        "curves": {"wf": curve(res.returns), "bh": curve(res.benchmark), "hind": curve(res.hindsight)},
+        "stats": {"wf": stats(res.returns, res.held), "bh": stats(res.benchmark),
+                  "hind": stats(res.hindsight)},
+        "hindsight_settings": res.hindsight_settings,
+        "distinct_settings": len({tuple(sorted(f["settings"].items())) for f in res.folds}),
+        "efficiency": clean(eff),
+    }
 
 
 def strategies_info() -> list:
@@ -197,8 +239,10 @@ class Handler(BaseHTTPRequestHandler):
     def optimize_page(self, query):
         ticker = dl.clean_ticker(query.get("ticker") or DEFAULT_TICKER)
         payload = optimize_payload(ticker, query)
+        library = (chart.WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text(encoding="utf-8")
         html_page = (chart.WEB / "optimize.html").read_text(encoding="utf-8").replace(
-            "/*__DATA__*/null", json.dumps(payload, separators=(",", ":")).replace("</", "<\\/"))
+            "/*__DATA__*/null", json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+        ).replace("/*__LIBRARY__*/", library)
         self.send(HTTPStatus.OK, chart.PAGE.format(body=html_page), "text/html; charset=utf-8")
 
     def api_strategies(self, query):

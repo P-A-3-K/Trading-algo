@@ -97,6 +97,18 @@ td.sep, th.sep { border-left: 1px solid var(--line); }
 .more { margin-top: 10px; }
 .notice { color: var(--muted); font-size: 13px; }
 [hidden] { display: none !important; }
+.wfFields { display: contents; }
+.wfFields[hidden], #splitField[hidden] { display: none !important; }
+#trainIn, #testIn { width: 6em; }
+.wfchart { position: relative; height: clamp(300px, 42vh, 460px); margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+#wfChart { position: absolute; inset: 0; }
+.legend { position: absolute; top: 8px; left: 8px; z-index: 3; pointer-events: none; padding: 2px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent); font: 12px/1.5 var(--mono); color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 2px 12px; max-width: calc(100% - 90px); }
+.legend b { color: var(--fg); font-weight: 500; }
+.sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+#wfStats td:first-child, #wfStats th:first-child, #wfFolds td.settings { text-align: left; font-family: var(--sans); }
+#wfStats tr.wf td { font-weight: 600; color: var(--fg); }
 .notice-box { border: 1px solid var(--line); border-left: 4px solid var(--down); border-radius: 8px; background: var(--panel);
   padding: 10px 14px; font-size: 13px; }
 .notice-box ul { margin: 6px 0 0; padding-left: 18px; }
@@ -119,11 +131,28 @@ footer { color: var(--muted); font-size: 12px; }
   <div class="notice-box" id="stratNotice" role="status" hidden></div>
   <section class="card" aria-labelledby="setupTitle">
     <h1 id="setupTitle">Parameter sweep <small id="stratName"></small></h1>
-    <p class="desc">Backtest every combination of the settings below. The first part of history picks the winners
+    <p class="desc" id="descSplit">Backtest every combination of the settings below. The first part of history picks the winners
       (<b>in-sample</b>); the rest checks them on data they never saw (<b>out-of-sample</b>).</p>
+    <p class="desc" id="descWf" hidden><b>Walk-forward:</b> pick the best settings on the first training years, trade them on the
+      next stretch, then move forward and repeat. The joined trading stretches are all out-of-sample: the most honest estimate
+      of what optimizing this strategy would really have earned.</p>
     <div class="ranges" id="ranges"></div>
     <div class="row2">
-      <label class="field"><span>In-sample share</span>
+      <label class="field"><span>Method</span>
+        <select name="mode" form="form" id="modeIn">
+          <option value="split">One split: in / out-of-sample</option>
+          <option value="wf">Walk-forward: re-optimize as you go</option></select></label>
+      <span class="wfFields" id="wfFields">
+        <label class="field"><span>Train on (years)</span>
+          <input type="number" name="train" form="form" id="trainIn" min="1" max="30" step="any" required></label>
+        <label class="field"><span>Then trade (years)</span>
+          <input type="number" name="test" form="form" id="testIn" min="0.25" max="10" step="any" required></label>
+        <label class="field"><span>Training window</span>
+          <select name="window" form="form" id="windowIn">
+            <option value="rolling">Rolling: last N years</option>
+            <option value="anchored">Anchored: all years so far</option></select></label>
+      </span>
+      <label class="field" id="splitField"><span>In-sample share</span>
         <select name="split" form="form" id="splitIn">
           <option value="0.5">50%</option><option value="0.6">60%</option><option value="0.7">70%</option>
           <option value="0.8">80%</option><option value="0.9">90%</option></select></label>
@@ -133,6 +162,19 @@ footer { color: var(--muted); font-size: 12px; }
       <button type="submit" class="run" form="form" id="runBtn">Run sweep</button>
     </div>
   </section>
+
+  <div id="wfResults" hidden>
+    <section class="card verdict" id="wfVerdict" aria-live="polite"></section>
+    <section class="card" style="margin-top:14px">
+      <h2>Growth of $10,000 <small id="wfChartNote"></small></h2>
+      <div class="wfchart"><div class="legend" id="wfLegend"></div><div id="wfChart"></div></div>
+      <div class="tablewrap"><table id="wfStats"></table></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Each window <small>train on the left period, then trade the chosen settings on the right one</small></h2>
+      <div class="tablewrap"><table id="wfFolds"></table></div>
+    </section>
+  </div>
 
   <div id="results" hidden>
     <section class="card verdict" id="verdict" aria-live="polite"></section>
@@ -160,6 +202,7 @@ footer { color: var(--muted); font-size: 12px; }
 </div>
 <div class="tip" id="tip" hidden></div>
 
+<script>/*__LIBRARY__*/</script>
 <script>
 const DATA = /*__DATA__*/null;
 const esc = t => String(t).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
@@ -227,6 +270,22 @@ document.getElementById("ranges").innerHTML =
       `<input form="form" type="number" name="${esc(k)}_step" value="${r[2]}" required min="${p.type === "int" ? 1 : 0.001}" step="${step}" aria-label="${esc(k)} step">`;
   }).join("");
 const countEl = document.getElementById("count");
+const modeIn = document.getElementById("modeIn");
+modeIn.value = A.mode;
+document.getElementById("trainIn").value = A.wf.train;
+document.getElementById("testIn").value = A.wf.test;
+document.getElementById("windowIn").value = A.wf.anchored ? "anchored" : "rolling";
+function showMode() {
+  const wf = modeIn.value === "wf";
+  document.getElementById("wfFields").hidden = !wf;
+  document.getElementById("splitField").hidden = wf;
+  document.getElementById("descSplit").hidden = wf;
+  document.getElementById("descWf").hidden = !wf;
+  document.getElementById("runBtn").textContent = wf ? "Run walk-forward" : "Run sweep";
+  A.max_combos = wf ? 2000 : 5000;
+  if (typeof countCombos === "function") countCombos();
+}
+modeIn.addEventListener("change", showMode);
 function countCombos() {
   let n = 1;
   for (const [k] of params) {
@@ -234,7 +293,7 @@ function countCombos() {
           s = +document.querySelector(`[name="${k}_step"]`).value;
     n *= s > 0 && t >= f ? Math.floor((t - f) / s + 1e-9) + 1 : 0;
   }
-  countEl.textContent = `${n.toLocaleString()} combinations`;
+  countEl.textContent = `${n.toLocaleString()} combinations` + (modeIn.value === "wf" ? " per window" : "");
   countEl.classList.toggle("too-many", n > A.max_combos);
   if (n > A.max_combos) countEl.textContent += ` (max ${A.max_combos.toLocaleString()})`;
   return n;
@@ -248,11 +307,99 @@ form.addEventListener("submit", e => {
   tIn.value = tIn.value.trim().toUpperCase();
   runBtn.disabled = true; runBtn.textContent = `Running ${n.toLocaleString()} backtests…`;
 });
-window.addEventListener("pageshow", () => { runBtn.disabled = false; runBtn.textContent = "Run sweep"; });
+window.addEventListener("pageshow", () => { runBtn.disabled = false; showMode(); });
+showMode();
+
+
+// ---- Walk-forward results -------------------------------------------------------------
+function drawWalkForward(W) {
+  document.getElementById("wfResults").hidden = false;
+  const LW = window.LightweightCharts, St = W.stats;
+  const pct = v => (v * 100).toFixed(1) + "%", money = v => "$" + Math.round(v).toLocaleString();
+  const settingText = s => params.map(([k, p]) => `${(p.label || k).replace(/ \(.*\)$/, "")} ${s[k]}`).join(", ");
+  // Verdict
+  const v = document.getElementById("wfVerdict");
+  // Judge on both: return (what you'd have made) and Sharpe (how smooth the ride was)
+  const moreMoney = St.wf.cagr >= St.bh.cagr, smoother = St.wf.sharpe >= St.bh.sharpe;
+  const [cls, head] = moreMoney && smoother ? ["good", "Walk-forward beat buy & hold: more return, and a smoother ride"]
+    : moreMoney ? ["weak", "Walk-forward made more than buy & hold, but with a bumpier ride"]
+    : smoother ? ["weak", "Smoother than buy & hold, but it made less money"]
+    : St.wf.cagr > 0 ? ["bad", "Walk-forward made money, but less than buy & hold, and less smoothly"]
+    : ["bad", "Walk-forward lost money: re-optimizing didn't find a lasting edge"];
+  v.classList.add(cls);
+  const eff = W.efficiency === null ? "–" : (W.efficiency * 100).toFixed(0) + "%";
+  v.innerHTML = `<h2>${head}</h2>
+    <p>Every number here is out-of-sample: each window was traded with settings picked only from the years before it.
+    That's the closest a backtest gets to how you'd really have used this strategy.</p>
+    <div class="kpis">
+      <div class="kpi"><span>Walk-forward return / year</span><b>${pct(St.wf.cagr)}</b></div>
+      <div class="kpi"><span>Buy & hold return / year</span><b>${pct(St.bh.cagr)}</b></div>
+      <div class="kpi"><span>Sharpe: walk-forward vs B&H</span><b>${St.wf.sharpe.toFixed(2)} vs ${St.bh.sharpe.toFixed(2)}</b></div>
+      <div class="kpi"><span>Kept of in-sample return</span><b>${eff}</b></div>
+      <div class="kpi"><span>Different settings chosen</span><b>${W.distinct_settings} of ${W.folds.length} windows</b></div>
+    </div>
+    <p class="notice">${W.count.toLocaleString()} combinations per window, ${W.folds.length} windows, ${W.seconds.toFixed(1)} s` +
+    (W.skipped ? ` · ${W.skipped} skipped (${esc(W.skip_reason)})` : "") +
+    `. "Kept" = average yearly return in the trading windows ÷ average in their training windows.
+    The best single setting in hindsight (${esc(settingText(W.hindsight_settings))}) made ${pct(St.hind.cagr)} a year, but nobody could have picked it in advance.</p>`;
+  // Comparison table
+  const rows = [["wf", "Walk-forward (out-of-sample)"], ["bh", "Buy & hold"], ["hind", "Best in hindsight (not achievable)"]];
+  document.getElementById("wfStats").innerHTML = `<thead><tr><th></th><th>Final value</th><th>Return / year</th><th>Sharpe</th><th>Worst drawdown</th></tr></thead><tbody>` +
+    rows.map(([k, label]) => `<tr class="${k}"><td>${label}</td><td>${money(St[k].final)}</td><td class="${St[k].cagr >= 0 ? "pos" : "neg"}">${pct(St[k].cagr)}</td><td>${St[k].sharpe.toFixed(2)}</td><td class="neg">${pct(St[k].max_dd)}</td></tr>`).join("") + `</tbody>`;
+  document.getElementById("wfChartNote").textContent = `${W.start} → ${W.end} · log scale · dots: settings re-chosen · dashed: best in hindsight`;
+  // Chart
+  const el = document.getElementById("wfChart");
+  const chart = LW.createChart(el, { autoSize: true, layout: { fontFamily: css("--mono"), fontSize: 11 },
+    rightPriceScale: { borderVisible: false, mode: LW.PriceScaleMode.Logarithmic },
+    timeScale: { borderVisible: false, minBarSpacing: 0.02 }, crosshair: { mode: LW.CrosshairMode.Normal } });
+  const money0 = v => "$" + (v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e4 ? (v / 1e3).toFixed(1) + "K" : Math.round(v).toLocaleString());
+  const mk = (opts) => chart.addSeries(LW.LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+    priceFormat: { type: "custom", formatter: money0 }, ...opts });
+  const hind = mk({ lineStyle: LW.LineStyle.Dashed, lineWidth: 1 }), bh = mk({}), wf = mk({ lastValueVisible: true });
+  hind.setData(W.curves.hind); bh.setData(W.curves.bh); wf.setData(W.curves.wf);
+  const markers = LW.createSeriesMarkers(wf, []);
+  function paint() {
+    chart.applyOptions({ layout: { background: { type: "solid", color: css("--panel") }, textColor: css("--muted") },
+      grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } } });
+    wf.applyOptions({ color: css("--accent") }); bh.applyOptions({ color: css("--muted") }); hind.applyOptions({ color: css("--warn") });
+    markers.setMarkers(W.folds.slice(1).map((f, i) => ({ time: f.test_start, position: "aboveBar", shape: "circle",
+      color: css("--muted"), size: 0.5 })));
+  }
+  paint();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paint);
+  new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  chart.timeScale().fitContent();
+  const lg = document.getElementById("wfLegend");
+  const at = new Map(W.curves.wf.map((p, i) => [p.time, i]));
+  const show = i => {
+    const sw = t => `<i class="sw" style="background:${css(t)}"></i>`;
+    lg.innerHTML = `<span><b>${W.curves.wf[i].time}</b></span>` +
+      `<span>${sw("--accent")}Walk-forward <b>${money0(W.curves.wf[i].value)}</b></span>` +
+      `<span>${sw("--muted")}Buy & hold <b>${money0(W.curves.bh[i].value)}</b></span>` +
+      `<span>${sw("--warn")}Hindsight <b>${money0(W.curves.hind[i].value)}</b></span>`;
+  };
+  show(W.curves.wf.length - 1);
+  chart.subscribeCrosshairMove(p => {
+    const key = p.time ? (typeof p.time === "string" ? p.time : `${p.time.year}-${String(p.time.month).padStart(2, "0")}-${String(p.time.day).padStart(2, "0")}`) : null;
+    show(key && at.has(key) ? at.get(key) : W.curves.wf.length - 1);
+  });
+  // Folds table
+  const rk = METRICS[W.rank] || METRICS.sharpe;
+  document.getElementById("wfFolds").innerHTML = `<thead><tr><th>#</th><th>Trained on</th><th>Then traded</th><th style="text-align:left">Settings chosen</th>` +
+    `<th>Train ${esc(rk.label.toLowerCase())}</th><th>Train return / yr</th><th>Trade return</th><th>Trade return / yr</th><th>Trade Sharpe</th></tr></thead><tbody>` +
+    W.folds.map((f, i) => {
+      const url = `/?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${S.id}&` + params.map(([k]) => `${k}=${f.settings[k]}`).join("&");
+      const trainScore = W.rank === "trades" ? Math.round(-f.train_score) : rk.fmt(f.train_score);
+      return `<tr><td><a href="${url}" title="Open these settings on the chart">${i + 1}</a></td><td>${f.train_start} → ${f.train_end}</td><td>${f.test_start} → ${f.test_end}</td>` +
+        `<td class="settings">${esc(settingText(f.settings))}</td><td>${trainScore}</td><td class="${f.train_cagr >= 0 ? "pos" : "neg"}">${pct(f.train_cagr)}</td>` +
+        `<td class="${f.test_return >= 0 ? "pos" : "neg"}">${pct(f.test_return)}</td><td class="${f.test_cagr >= 0 ? "pos" : "neg"}">${pct(f.test_cagr)}</td><td>${f.test_sharpe.toFixed(2)}</td></tr>`;
+    }).join("") + `</tbody>`;
+}
 
 // ---- Results -----------------------------------------------------------------------
 const RES = DATA.result;
-if (RES) {
+if (RES && RES.mode === "wf") drawWalkForward(RES);
+if (RES && RES.mode !== "wf") {
   document.getElementById("results").hidden = false;
   const rows = RES.rows, bench = RES.benchmark, varied = RES.params;
   const rk = A.rank, M = METRICS[rk];

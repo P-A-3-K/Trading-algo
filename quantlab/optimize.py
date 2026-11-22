@@ -138,3 +138,115 @@ def overfitting_report(res: SweepResult, by: str = "sharpe", top: int = 10) -> d
         # Spearman rank correlation: +1 = IS ranking held up perfectly, 0 = no link
         "rank_corr": float(t[f"is_{by}"].rank().corr(t[f"oos_{by}"].rank())),
     }
+
+
+# ---- Walk-forward analysis ---------------------------------------------------------------
+
+WF_MAX_COMBINATIONS = 2000
+YEAR = 252
+
+
+def _metric(R: np.ndarray, H: np.ndarray, metric: str) -> np.ndarray:
+    """Score every row (one combination) of a slice of daily returns; higher = better."""
+    n = R.shape[1]
+    if metric == "sharpe":
+        sd = R.std(axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            score = np.where(sd > 0, R.mean(axis=1) / sd * np.sqrt(YEAR), -np.inf)
+        return score
+    growth = np.prod(1 + R, axis=1)
+    if metric == "final":
+        return growth
+    if metric == "cagr":
+        return growth ** (YEAR / n) - 1
+    if metric == "max_dd":
+        eq = np.cumprod(1 + R, axis=1)
+        return (eq / np.maximum.accumulate(eq, axis=1) - 1).min(axis=1)
+    if metric == "trades":                       # fewer is better
+        changes = (np.diff(H, axis=1) != 0).sum(axis=1)
+        return -changes.astype(float)
+    raise ValueError(f"unknown metric {metric!r}")
+
+
+@dataclass
+class WalkForwardResult:
+    folds: list                    # one dict per fold: periods, chosen settings, scores
+    returns: pd.Series             # stitched out-of-sample daily returns (test windows only)
+    held: pd.Series                # position held each day of the stitched run
+    benchmark: pd.Series           # buy & hold daily returns, same days
+    hindsight: pd.Series           # best single setting over the same days (not knowable!)
+    hindsight_settings: dict
+    params: list
+    combos: int
+    skipped: list
+    seconds: float
+
+
+def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
+                 test_years: float = 2, anchored: bool = False, rank: str = "sharpe",
+                 cost_bps: float = 5.0) -> WalkForwardResult:
+    """Re-optimize on each training window, trade the winner on the next test window.
+
+    rolling (default): every training window is `train_years` long.
+    anchored: training always starts at the first day and grows.
+    """
+    t0 = time.time()
+    train, test = int(round(train_years * YEAR)), int(round(test_years * YEAR))
+    if train < YEAR // 2 or test < 20:
+        raise ValueError("training needs at least half a year and testing at least 20 days")
+    n = len(bars)
+    if train + test > n:
+        raise ValueError(f"not enough history: {n / YEAR:.1f} years, but training + testing "
+                         f"needs {(train + test) / YEAR:.1f}")
+    combos, skipped = [], []
+    for settings in grid(cls, ranges):
+        try:
+            combos.append((settings, cls(**settings)))
+        except ValueError as e:
+            skipped.append((settings, str(e)))
+    if not combos:
+        raise ValueError("No valid combinations: " + (skipped[0][1] if skipped else "empty grid"))
+    if len(combos) > WF_MAX_COMBINATIONS:
+        raise ValueError(f"{len(combos):,} combinations is too many for walk-forward "
+                         f"(max {WF_MAX_COMBINATIONS:,}). Use bigger steps.")
+    R = np.empty((len(combos), n))
+    H = np.empty((len(combos), n))
+    for j, (_, strategy) in enumerate(combos):
+        bt = simulate(bars, strategy.run(bars), cost_bps)
+        R[j], H[j] = bt.returns.to_numpy(), bt.positions.to_numpy()
+
+    idx = bars.index
+    wf_r, wf_h = np.zeros(n), np.zeros(n)
+    folds, prev = [], None
+    start = train
+    while start < n:
+        end = min(start + test, n)
+        lo = 0 if anchored else start - train
+        score = _metric(R[:, lo:start], H[:, lo:start], rank)
+        best = int(np.nanargmax(np.where(np.isfinite(score), score, -np.inf)))
+        wf_r[start:end] = R[best, start:end]
+        wf_h[start:end] = H[best, start:end]
+        if prev is not None and prev != best:      # switching settings costs a trade
+            wf_r[start] -= abs(H[best, start - 1] - H[prev, start - 1]) * cost_bps / 10_000
+        seg = R[best, start:end]
+        folds.append({
+            "train_start": idx[lo], "train_end": idx[start - 1],
+            "test_start": idx[start], "test_end": idx[end - 1],
+            "settings": dict(combos[best][0]),
+            "train_score": float(score[best]),
+            "train_cagr": float(np.prod(1 + R[best, lo:start]) ** (YEAR / (start - lo)) - 1),
+            "test_return": float(np.prod(1 + seg) - 1),
+            "test_cagr": float(np.prod(1 + seg) ** (YEAR / len(seg)) - 1),
+            "test_sharpe": float(seg.mean() / seg.std() * np.sqrt(YEAR)) if seg.std() > 0 else 0.0,
+        })
+        prev, start = best, end
+
+    first = train
+    span = idx[first:]
+    hind = _metric(R[:, first:], H[:, first:], rank)
+    hbest = int(np.nanargmax(np.where(np.isfinite(hind), hind, -np.inf)))
+    bh = run_backtest(bars["close"], pd.Series(1.0, index=idx), cost_bps).returns.iloc[first:]
+    return WalkForwardResult(
+        folds, pd.Series(wf_r[first:], index=span), pd.Series(wf_h[first:], index=span),
+        bh, pd.Series(R[hbest, first:], index=span), dict(combos[hbest][0]),
+        list(ranges), len(combos), skipped, time.time() - t0)

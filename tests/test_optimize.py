@@ -87,8 +87,46 @@ def test_optimize_page(tmp_path, monkeypatch):
         assert status == 200 and r["count"] == 6 and r["params"] == ["fast", "slow"]
         assert r["axis_values"] == {"fast": [10, 20, 30], "slow": [40, 60]}
         assert data["app"]["rank"] == "cagr"
+        status, body = get(base + "/optimize?ticker=TEST&strategy=SmaCrossover&mode=wf&train=1&test=0.5&" + q)
+        w = json.loads(body.split("const DATA = ")[1].split(";\n")[0])["result"]
+        assert status == 200 and w["mode"] == "wf" and len(w["folds"]) >= 2
+        assert set(w["stats"]) == {"wf", "bh", "hind"} and "LightweightCharts" in body
         assert get(base + "/optimize?ticker=TEST&strategy=BuyAndHold")[0] == 400
         assert get(base + "/optimize?ticker=TEST&strategy=SmaCrossover&fast_from=30&fast_to=10&fast_step=5"
                    "&slow_from=40&slow_to=60&slow_step=20&run=1")[0] == 400
     finally:
         srv.shutdown(); srv.server_close()
+
+
+def test_walk_forward_windows_and_stitching():
+    b = bars(n=1300, seed=5)
+    w = optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10), "slow": (40, 80, 20)},
+                              train_years=2, test_years=1)
+    # train 504 days, test 252: tests start at 504, 756, 1008, 1260 -> 4 windows
+    assert len(w.folds) == 4 and w.returns.index[0] == b.index[504]
+    assert w.folds[0]["train_start"] == b.index[0] and w.folds[1]["train_start"] == b.index[252]
+    assert w.folds[-1]["test_end"] == b.index[-1]
+    # each window's returns are exactly the chosen settings' returns (no switch at window 1)
+    from quantlab.backtest import simulate
+    f = w.folds[0]
+    run = simulate(b, SmaCrossover(**f["settings"]).run(b))
+    window = slice(f["test_start"], f["test_end"])
+    assert np.allclose(w.returns[window], run.returns[window])
+    assert len(w.benchmark) == len(w.returns) == len(w.hindsight)
+
+
+def test_walk_forward_anchored_and_errors():
+    b = bars(n=1300, seed=5)
+    w = optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10)}, 2, 1, anchored=True)
+    assert all(f["train_start"] == b.index[0] for f in w.folds)
+    with pytest.raises(ValueError, match="not enough history"):
+        optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10)}, 5, 1)
+    with pytest.raises(ValueError, match="at least"):
+        optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10)}, 0.1, 1)
+
+
+def test_walk_forward_metric_direction():
+    R = np.array([[0.01, -0.01, 0.02], [0.001, 0.001, 0.001]])
+    H = np.array([[1, 0, 1], [1, 1, 1]], dtype=float)
+    assert optimize._metric(R, H, "trades").argmax() == 1          # fewest trades wins
+    assert optimize._metric(R, H, "max_dd").argmax() == 1          # smallest drawdown wins
