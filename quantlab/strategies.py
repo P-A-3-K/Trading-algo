@@ -55,6 +55,20 @@ class MeanReversion(Strategy):
 BUILTIN = [BuyAndHold, SmaCrossover, MeanReversion]
 
 
+def available() -> dict:
+    """All strategies the app can run, by class name."""
+    return {cls.__name__: cls for cls in BUILTIN}
+
+
+def get(name: str):
+    """Find a strategy class by name (case-insensitive)."""
+    by_lower = {k.lower(): v for k, v in available().items()}
+    cls = by_lower.get(str(name).lower())
+    if cls is None:
+        raise ValueError(f"Unknown strategy {name!r}. Choose from: " + ", ".join(available()))
+    return cls
+
+
 def _bars(prices: pd.Series) -> pd.DataFrame:
     return pd.DataFrame({"close": prices})
 

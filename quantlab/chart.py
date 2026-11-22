@@ -134,16 +134,11 @@ def render(ticker: str, df: pd.DataFrame, adjusted: bool = True,
     When plots are given, df must be on the same price basis as the strategy
     ran on (adjusted, as from download.load_bars) so the lines sit on the candles.
     """
-    template = (WEB / "candles.html").read_text()
-    library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text()
     payload = {"ticker": ticker.upper(), "adjusted": adjusted, "strategy": strategy,
                "bars": candles(df, adjusted), "plots": plots_payload(plots or []),
                "trades": trades_payload(fills), "equity": equity,
                "stats": stats}
-    return (template
-            .replace("__TICKER__", ticker.upper())
-            .replace("/*__LIBRARY__*/", library)
-            .replace("/*__DATA__*/null", json.dumps(payload, separators=(",", ":"))))
+    return render_payload(payload)
 
 
 PAGE = """<!doctype html>
@@ -155,39 +150,61 @@ PAGE = """<!doctype html>
 """
 
 
-def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPORTS) -> Path:
-    """Write reports/<TICKER>[_<Strategy>].html (downloads the data if needed)."""
+def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
+    """Everything the chart page shows, for one ticker and optional strategy.
+
+    Used both for saved report files and by the web app (quantlab.app).
+    """
+    ticker = dl.clean_ticker(ticker)
     df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
-    plots, fills, equity, stats, label, name = [], None, None, None, "", ticker.upper()
+    plots, fills, equity, stats, label = [], None, None, None, ""
     if strategy is not None:
         from .backtest import run_backtest, trades
+        from .metrics import full_stats
         bars = dl.load_bars(ticker)
         out = strategy.run(bars)
         plots, fills = out.plots, trades(out.positions, bars["close"])
         strat = run_backtest(bars["close"], out.positions)
         bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
         equity = equity_payload(strat.returns, bench.returns)
-        from .metrics import full_stats
         stats = stats_payload(full_stats(strat.returns, strat.positions, len(fills)),
                               full_stats(bench.returns, bench.positions, 1))
-        label, name = repr(strategy), f"{name}_{type(strategy).__name__}"
-        adjusted = True          # strategies run on adjusted bars
+        label, adjusted = repr(strategy), True     # strategies run on adjusted bars
+    return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
+            "bars": candles(df, adjusted), "plots": plots_payload(plots),
+            "trades": trades_payload(fills), "equity": equity, "stats": stats}
+
+
+def render_payload(payload: dict, page_title: str = None) -> str:
+    """Fill the page template with a payload from build_payload()."""
+    template = (WEB / "candles.html").read_text()
+    library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text()
+    data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    return (template
+            .replace("__TICKER__", page_title or payload["ticker"])
+            .replace("/*__LIBRARY__*/", library)
+            .replace("/*__DATA__*/null", data))
+
+
+def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPORTS) -> Path:
+    """Write reports/<TICKER>[_<Strategy>].html (downloads the data if needed)."""
+    payload = build_payload(ticker, strategy, adjusted)
+    name = payload["ticker"] + (f"_{type(strategy).__name__}" if strategy is not None else "")
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"{name}.html"
-    path.write_text(PAGE.format(body=render(ticker, df, adjusted, plots, label, fills, equity, stats)))
+    path.write_text(PAGE.format(body=render_payload(payload)))
     return path
 
 
 def _parse_args(argv):
     """SPY [StrategyName [key=value ...]]"""
-    from .strategies import BUILTIN
+    from . import strategies
     ticker, strategy = (argv[0] if argv else "SPY"), None
     if len(argv) > 1:
-        by_name = {cls.__name__.lower(): cls for cls in BUILTIN}
-        cls = by_name.get(argv[1].lower())
-        if cls is None:
-            raise SystemExit(f"Unknown strategy {argv[1]!r}. Choose from: "
-                             + ", ".join(c.__name__ for c in BUILTIN))
+        try:
+            cls = strategies.get(argv[1])
+        except ValueError as e:
+            raise SystemExit(str(e))
         settings = dict(a.split("=", 1) for a in argv[2:])
         strategy = cls(**settings)
     return ticker, strategy

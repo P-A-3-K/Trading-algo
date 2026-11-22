@@ -3,6 +3,7 @@
 Each lesson adds one feature to the software and teaches the idea behind it.
 
 ```bash
+python -m quantlab.app                  # the QuantLab web app: http://127.0.0.1:8000
 pip install pandas numpy requests pandas_market_calendars pytest
 python lessons/01_first_backtest.py
 python lessons/02_real_data.py          # downloads SPY & AAPL into data/ on first run
@@ -18,6 +19,7 @@ pytest -q
 |---|---|
 | `quantlab/download.py` | Download real prices from Yahoo, cache them in `data/` |
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
+| `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |
 | `quantlab/chart.py` | Interactive candlestick chart page (TradingView Lightweight Charts, bundled in `quantlab/web/vendor`) |
 | `quantlab/data.py` | Prices, returns, random walks (synthetic data = a "no edge" control group) |
 | `quantlab/strategy.py` | The Strategy plug-in class: name, settings, `compute()` -> positions, `plot()` lines; look-ahead detector |

@@ -4,6 +4,7 @@ Yahoo's chart endpoint is unofficial and for personal, non-commercial use
 (see docs/data-sources.md). So we download once, save to data/, and read the
 saved file afterwards instead of asking Yahoo again on every run.
 """
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,14 +40,35 @@ def fetch(ticker: str, timeout: float = 30) -> pd.DataFrame:
     """Download the full daily history for one ticker."""
     params = {"period1": 0, "period2": int(time.time()), "interval": "1d",
               "events": "div,split", "includeAdjustedClose": "true"}
-    resp = requests.get(URL.format(ticker=ticker), params=params,
+    resp = requests.get(URL.format(ticker=clean_ticker(ticker)), params=params,
                         headers=HEADERS, timeout=timeout)
     resp.raise_for_status()
     return parse_chart(resp.json())
 
 
+TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,14}$")
+
+
+def clean_ticker(ticker: str) -> str:
+    """Upper-case a ticker and reject anything that isn't a plausible symbol.
+
+    Tickers become file names and URLs, so this stops input like '../secret'
+    from reaching files outside data/. Allowed: letters, digits, . - ^ =
+    (e.g. BRK-B, ^GSPC, EURUSD=X), up to 15 characters.
+    """
+    t = str(ticker).strip().upper()
+    if not TICKER_RE.match(t):
+        raise ValueError(f"Not a valid ticker: {ticker!r}")
+    return t
+
+
 def csv_path(ticker: str) -> Path:
-    return DATA_DIR / f"{ticker.upper()}.csv"
+    return DATA_DIR / f"{clean_ticker(ticker)}.csv"
+
+
+def cached_tickers() -> list:
+    """Tickers already downloaded into data/, alphabetically."""
+    return sorted(p.stem for p in DATA_DIR.glob("*.csv") if TICKER_RE.match(p.stem))
 
 
 def download(ticker: str, refresh: bool = False) -> Path:
