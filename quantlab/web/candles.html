@@ -84,6 +84,11 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .appbar input, .appbar select { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
 .appbar input { width: 8.5em; text-transform: uppercase; }
+.params { display: contents; }
+.params .field span { max-width: 13em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appbar .param input { width: 7em; text-transform: none; }
+.param.changed input { border-color: var(--accent); }
+.appbar input:invalid { border-color: var(--down); }
 .appbar select { max-width: 100%; }
 .appbar input:focus-visible, .appbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .appbar button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; font-size: 13px; }
@@ -102,8 +107,9 @@ footer a { color: inherit; }
              title="A ticker symbol, e.g. SPY, AAPL, BRK-B, ^GSPC"></label>
     <datalist id="tickerList"></datalist>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
-    <span id="settingsIn"></span>
+    <span id="settingsIn" class="params"></span>
     <button type="submit" class="run" id="runBtn">Run</button>
+    <button type="button" id="resetBtn" hidden title="Put every setting back to the strategy's default">Reset</button>
     <span class="desc" id="stratDesc"></span>
   </form>
   <header>
@@ -391,9 +397,26 @@ if (DATA.app) {
   sIn.value = A.strategy;
   const describe = () => { desc.textContent = byId[sIn.value]?.description || "Just the price chart, no strategy."; };
   describe();
-  // Keep the current settings when only the ticker changes
-  keep.innerHTML = Object.entries(A.settings).map(([k, v]) =>
-    `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("");
+  // One number box per strategy setting, built from the strategy's params:
+  // label, allowed range and step come from Param(default, min, max, label, step)
+  const params = byId[A.strategy]?.params || {};
+  keep.innerHTML = Object.entries(params).map(([k, p]) => {
+    const value = A.settings[k] ?? p.default;
+    const range = [p.min, p.max].every(v => v !== null) ? `${p.min}–${p.max}` : "";
+    const changed = value !== p.default ? " changed" : "";
+    return `<label class="field param${changed}" title="${esc((p.label || k) + (range ? " · allowed " + range : "") + " · default " + p.default)}">` +
+      `<span>${esc(p.label || k)}</span>` +
+      `<input type="number" name="${esc(k)}" value="${esc(value)}" required` +
+      (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "") +
+      ` step="${p.step ?? "any"}" inputmode="${p.type === "int" ? "numeric" : "decimal"}"></label>`;
+  }).join("");
+  const resetBtn = document.getElementById("resetBtn");
+  const anyChanged = Object.entries(params).some(([k, p]) => (A.settings[k] ?? p.default) !== p.default);
+  resetBtn.hidden = !anyChanged;
+  resetBtn.addEventListener("click", () => {
+    keep.querySelectorAll("input").forEach(i => { i.value = params[i.name].default; });
+    form.requestSubmit();
+  });
   sIn.addEventListener("change", () => {      // new strategy: start from its defaults
     keep.innerHTML = ""; describe(); form.requestSubmit();
   });
