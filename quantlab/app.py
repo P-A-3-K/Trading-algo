@@ -24,7 +24,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import chart, strategies
+import math
+
+from . import chart, optimize, strategies
 from . import download as dl
 
 DEFAULT_TICKER = "SPY"
@@ -45,6 +47,94 @@ def strategy_from_query(query: dict):
     return cls(**settings)
 
 
+RANK_METRICS = ("sharpe", "cagr", "final", "max_dd", "trades")
+
+
+def nice_step(span: float, is_int: bool, target: int = 19) -> float:
+    """A round step that gives about `target` values across `span`."""
+    raw = span / target
+    for e in range(-3, 6):                  # smallest round step that is big enough
+        for m in (1, 2, 2.5, 5):
+            step = m * 10 ** e
+            if step >= raw:
+                return max(1, int(round(step))) if is_int else step
+    return raw
+
+
+def default_ranges(cls) -> dict:
+    """Starting from/to/step for each setting: its allowed range in ~20 round steps."""
+    out = {}
+    for k, p in cls.params.items():
+        lo = p.min if p.min is not None else p.default
+        hi = p.max if p.max is not None else p.default
+        if hi == lo:
+            out[k] = [p.default, p.default, 1 if p.is_int else 0.1]
+            continue
+        step = nice_step(hi - lo, p.is_int)
+        start = math.ceil(lo / step) * step
+        stop = math.floor(hi / step) * step
+        if p.is_int:
+            start, stop = int(start), int(stop)
+        else:
+            start, stop, step = round(start, 6), round(stop, 6), round(step, 6)
+        out[k] = [start, stop, step]
+    return out
+
+
+def clean(v):
+    """JSON-safe number: NaN/inf -> None, numpy -> float."""
+    if v is None:
+        return None
+    v = float(v)
+    return None if math.isnan(v) or math.isinf(v) else v
+
+
+def optimize_payload(ticker: str, query: dict) -> dict:
+    """Everything the optimizer page needs; runs the sweep when query has run=1."""
+    cls = strategies.get(query.get("strategy") or DEFAULT_STRATEGY)
+    if not cls.params:
+        raise ValueError(f"{cls.name} has no settings to sweep. Pick another strategy.")
+    ranges = default_ranges(cls)
+    for k, p in cls.params.items():
+        if f"{k}_from" in query:
+            ranges[k] = [float(query[f"{k}_from"]), float(query[f"{k}_to"]), float(query[f"{k}_step"])]
+            if p.is_int:
+                ranges[k] = [int(round(x)) for x in ranges[k]]
+    split = float(query.get("split", 0.7))
+    rank = query.get("rank", "sharpe")
+    if rank not in RANK_METRICS:
+        rank = "sharpe"
+    app = {"strategy": cls.__name__, "strategies": strategies_info(),
+           "tickers": dl.cached_tickers(), "ranges": ranges, "split": split,
+           "rank": rank, "max_combos": optimize.MAX_COMBINATIONS}
+    payload = {"ticker": ticker, "app": app, "result": None}
+    if query.get("run"):
+        bars = dl.load_bars(ticker)
+        res = optimize.sweep(bars, cls, {k: tuple(v) for k, v in ranges.items()}, split)
+        if res.table.empty:
+            raise ValueError("No valid combinations: " + (res.skipped[0][1] if res.skipped else "empty grid"))
+        varied = [k for k, (a, b, _) in ranges.items() if b > a]
+        p_int = {k: cls.params[k].is_int for k in ranges}
+        rows = [{k: (clean(v) if k not in ranges else (int(v) if p_int[k] else float(v)))
+                 for k, v in row.items()} for row in res.table.to_dict("records")]
+        idx = bars.index
+        split_pos = idx.get_loc(res.split_date)
+        payload["result"] = {
+            "rows": rows, "params": varied, "count": len(rows),
+            "skipped": len(res.skipped),
+            "skip_reason": res.skipped[0][1] if res.skipped else "",
+            "seconds": res.seconds,
+            "benchmark": {k: clean(v) for k, v in res.benchmark.items()},
+            "report": {k: (clean(v) if not isinstance(v, str) else v)
+                       for k, v in optimize.overfitting_report(res, "sharpe").items()},
+            "axis_values": {k: optimize.values(*ranges[k], p_int[k]) for k in varied},
+            "start": str(res.start.date()), "end": str(res.end.date()),
+            "split_date": str(res.split_date.date()),
+            "split_before": str(idx[split_pos - 1].date()),
+        }
+    return payload
+
+
 def strategies_info() -> list:
     return [{"id": key, **cls.info()} for key, cls in strategies.available().items()]
 
@@ -55,7 +145,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         query = {k: v[-1] for k, v in parse_qs(url.query).items()}
-        routes = {"/": self.page, "/api/strategies": self.api_strategies,
+        routes = {"/": self.page, "/optimize": self.optimize_page,
+                  "/api/strategies": self.api_strategies,
                   "/api/tickers": self.api_tickers, "/api/backtest": self.api_backtest,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
@@ -84,6 +175,13 @@ class Handler(BaseHTTPRequestHandler):
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
                   "text/html; charset=utf-8")
+
+    def optimize_page(self, query):
+        ticker = dl.clean_ticker(query.get("ticker") or DEFAULT_TICKER)
+        payload = optimize_payload(ticker, query)
+        html_page = (chart.WEB / "optimize.html").read_text(encoding="utf-8").replace(
+            "/*__DATA__*/null", json.dumps(payload, separators=(",", ":")).replace("</", "<\\/"))
+        self.send(HTTPStatus.OK, chart.PAGE.format(body=html_page), "text/html; charset=utf-8")
 
     def api_strategies(self, query):
         self.send_json({"strategies": strategies_info()})

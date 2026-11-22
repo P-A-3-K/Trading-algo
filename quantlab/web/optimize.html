@@ -1,0 +1,391 @@
+<title>QuantLab Optimizer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: control bar, sweep settings card, then results: verdict, twin heatmaps (in-sample | out-of-sample), ranked table. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #15191f; --muted: #5d6673; --line: #dfe3e8;
+  --grid: #eceff3; --up: #12855f; --down: #c8423b; --accent: #2f5fd0; --warn: #a86200;
+  --empty: #eceff3;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff; --warn: #f0a63a;
+  --empty: #1c2229; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff; --warn: #f0a63a;
+  --empty: #1c2229; color-scheme: dark; }
+
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
+.wrap { box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; max-width: 1400px; margin: 0 auto;
+  padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { margin: 0; font: 600 22px/1.2 var(--sans); }
+h2 { margin: 0; font: 600 16px/1.2 var(--sans); }
+h2 small, h1 small { font: 400 13px var(--sans); color: var(--muted); margin-left: 6px; }
+a { color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.appbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.brand { font: 600 15px/1 var(--sans); letter-spacing: .02em; align-self: center; margin-right: 6px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field > span { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+input, select { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
+input:invalid { border-color: var(--down); }
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#tickerIn { width: 8.5em; text-transform: uppercase; }
+button { font: 500 13px/1 var(--mono); letter-spacing: .04em; color: var(--muted); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 9px 14px; cursor: pointer; }
+button:hover { color: var(--fg); }
+button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; }
+button.run:disabled { opacity: .7; cursor: progress; }
+.navlink { align-self: center; font: 500 13px/1 var(--mono); }
+.desc { color: var(--muted); font-size: 13px; }
+
+/* Sweep settings */
+.ranges { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 8px 12px; align-items: end; max-width: 720px; }
+.ranges .head { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.ranges .name { font-weight: 500; align-self: center; }
+.ranges .name small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
+.ranges input { width: 100%; box-sizing: border-box; }
+.row2 { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin-top: 14px; }
+.count { font: 500 13px var(--mono); color: var(--muted); align-self: center; }
+.count.too-many { color: var(--down); }
+
+/* Verdict */
+.verdict { border-left: 4px solid var(--muted); }
+.verdict.bad { border-left-color: var(--down); } .verdict.weak { border-left-color: var(--warn); } .verdict.good { border-left-color: var(--up); }
+.verdict p { margin: 6px 0 0; max-width: 75ch; }
+.kpis { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 12px; }
+.kpi span { display: block; font: 500 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.kpi b { font: 500 18px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+
+/* Heatmaps */
+.maps-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 16px; }
+.maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; margin-top: 10px; }
+.map h3 { margin: 0 0 2px; font: 600 14px/1.3 var(--sans); }
+.map .period { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.map .plot { overflow-x: auto; }
+.map svg { display: block; width: 100%; height: auto; min-width: 300px; }
+.map svg text { fill: var(--muted); font: 11px var(--mono); }
+.map rect.cell { cursor: pointer; }
+.map rect.cell:hover, .map rect.cell:focus { stroke: var(--fg); stroke-width: 2; outline: none; }
+.map rect.best { stroke: var(--fg); stroke-width: 2.5; }
+.legendbar { display: flex; align-items: center; gap: 8px; font: 12px var(--mono); color: var(--muted); margin-top: 8px; }
+.legendbar .ramp { width: 160px; height: 10px; border-radius: 3px; }
+.tip { position: fixed; z-index: 10; pointer-events: none; background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font: 12px/1.5 var(--mono); box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+.tip b { font-weight: 600; }
+
+/* Results table */
+.tablewrap { overflow-x: auto; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th { font: 500 11px/1.2 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); position: sticky; top: 0; background: var(--panel); }
+th button { all: unset; cursor: pointer; } th button:hover { color: var(--fg); }
+th button:focus-visible { outline: 2px solid var(--accent); }
+th.sorted button { color: var(--fg); }
+th.grp { text-align: center; border-bottom: 0; padding-bottom: 0; }
+td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.pos { color: var(--up); } td.neg { color: var(--down); }
+tr.bench td { color: var(--muted); font-style: italic; }
+tr.top td:first-child { box-shadow: inset 3px 0 var(--accent); }
+td.sep, th.sep { border-left: 1px solid var(--line); }
+.more { margin-top: 10px; }
+.notice { color: var(--muted); font-size: 13px; }
+[hidden] { display: none !important; }
+footer { color: var(--muted); font-size: 12px; }
+</style>
+
+<div class="wrap">
+  <form class="card appbar" id="form" method="get" action="/optimize">
+    <span class="brand">QuantLab</span>
+    <label class="field"><span>Ticker</span>
+      <input id="tickerIn" name="ticker" list="tickerList" autocomplete="off" spellcheck="false" maxlength="15" required
+             pattern="[A-Za-z0-9][A-Za-z0-9.\-^=]{0,14}"></label>
+    <datalist id="tickerList"></datalist>
+    <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
+    <a class="navlink" id="chartLink" href="/">← Chart</a>
+    <input type="hidden" name="run" value="1">
+  </form>
+
+  <section class="card" aria-labelledby="setupTitle">
+    <h1 id="setupTitle">Parameter sweep <small id="stratName"></small></h1>
+    <p class="desc">Backtest every combination of the settings below. The first part of history picks the winners
+      (<b>in-sample</b>); the rest checks them on data they never saw (<b>out-of-sample</b>).</p>
+    <div class="ranges" id="ranges"></div>
+    <div class="row2">
+      <label class="field"><span>In-sample share</span>
+        <select name="split" form="form" id="splitIn">
+          <option value="0.5">50%</option><option value="0.6">60%</option><option value="0.7">70%</option>
+          <option value="0.8">80%</option><option value="0.9">90%</option></select></label>
+      <label class="field"><span>Rank by</span>
+        <select name="rank" form="form" id="rankIn"></select></label>
+      <span class="count" id="count"></span>
+      <button type="submit" class="run" form="form" id="runBtn">Run sweep</button>
+    </div>
+  </section>
+
+  <div id="results" hidden>
+    <section class="card verdict" id="verdict" aria-live="polite"></section>
+
+    <section class="card" id="mapsCard" style="margin-top:14px">
+      <div class="maps-head">
+        <h2>Heatmap <small id="mapNote"></small></h2>
+        <label class="field"><span>Colour by</span><select id="mapMetric"></select></label>
+      </div>
+      <div class="maps">
+        <div class="map"><h3>In-sample</h3><div class="period" id="isPeriod"></div><div class="plot" id="mapIS"></div></div>
+        <div class="map"><h3>Out-of-sample</h3><div class="period" id="oosPeriod"></div><div class="plot" id="mapOOS"></div></div>
+      </div>
+      <div class="legendbar"><span id="lgLow"></span><span class="ramp" id="lgRamp"></span><span id="lgHigh"></span>
+        <span>· outlined: best in-sample · grey: not allowed · click a square to open it on the chart</span></div>
+    </section>
+
+    <section class="card" style="margin-top:14px">
+      <h2>All combinations <small id="tableNote"></small></h2>
+      <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+      <button type="button" class="more" id="moreBtn" hidden></button>
+    </section>
+  </div>
+  <footer>Past results, especially the best of many tries, overstate what to expect. Out-of-sample numbers are the honest ones.</footer>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const esc = t => String(t).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const A = DATA.app, S = A.strategies.find(s => s.id === A.strategy) || A.strategies[0];
+const params = Object.entries(S.params);
+
+// ---- Controls --------------------------------------------------------------------
+const tIn = document.getElementById("tickerIn"), sIn = document.getElementById("stratIn");
+tIn.value = DATA.ticker;
+document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
+const sweepable = A.strategies.filter(s => Object.keys(s.params).length);
+sIn.innerHTML = sweepable.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
+sIn.value = S.id;
+sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&strategy=${sIn.value}`; });
+tIn.addEventListener("input", () => { tIn.value = tIn.value.toUpperCase(); });
+document.getElementById("stratName").textContent = S.name;
+document.getElementById("splitIn").value = String(A.split);
+document.getElementById("chartLink").href = `/?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${S.id}`;
+
+const METRICS = {
+  sharpe: { label: "Sharpe ratio", fmt: v => v.toFixed(2), better: "higher" },
+  cagr: { label: "Return per year", fmt: v => (v * 100).toFixed(1) + "%", better: "higher" },
+  final: { label: "Final value", fmt: v => "$" + Math.round(v).toLocaleString(), better: "higher" },
+  max_dd: { label: "Worst drawdown", fmt: v => (v * 100).toFixed(1) + "%", better: "higher" },
+  trades: { label: "Trades", fmt: v => Math.round(v).toLocaleString(), better: "lower" },
+  win_rate: { label: "Win rate", fmt: v => (v * 100).toFixed(0) + "%", better: "higher" },
+};
+const rankIn = document.getElementById("rankIn");
+rankIn.innerHTML = ["sharpe", "cagr", "final", "max_dd", "trades"].map(k =>
+  `<option value="${k}">${METRICS[k].label}${k === "trades" ? " (fewest)" : ""}</option>`).join("");
+rankIn.value = A.rank;
+
+// One row per setting: from / to / step
+const R = A.ranges;
+document.getElementById("ranges").innerHTML =
+  `<span class="head">Setting</span><span class="head">From</span><span class="head">To</span><span class="head">Step</span>` +
+  params.map(([k, p]) => {
+    const r = R[k], lim = (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "");
+    const step = p.type === "int" ? 1 : "any";   // ranges like 0.25 must be allowed; the server checks values
+    return `<span class="name">${esc(p.label || k)}<small>${esc(k)} · allowed ${p.min}–${p.max}</small></span>` +
+      `<input form="form" type="number" name="${esc(k)}_from" value="${r[0]}" required${lim} step="${step}" aria-label="${esc(k)} from">` +
+      `<input form="form" type="number" name="${esc(k)}_to" value="${r[1]}" required${lim} step="${step}" aria-label="${esc(k)} to">` +
+      `<input form="form" type="number" name="${esc(k)}_step" value="${r[2]}" required min="${p.type === "int" ? 1 : 0.001}" step="${step}" aria-label="${esc(k)} step">`;
+  }).join("");
+const countEl = document.getElementById("count");
+function countCombos() {
+  let n = 1;
+  for (const [k] of params) {
+    const f = +document.querySelector(`[name="${k}_from"]`).value, t = +document.querySelector(`[name="${k}_to"]`).value,
+          s = +document.querySelector(`[name="${k}_step"]`).value;
+    n *= s > 0 && t >= f ? Math.floor((t - f) / s + 1e-9) + 1 : 0;
+  }
+  countEl.textContent = `${n.toLocaleString()} combinations`;
+  countEl.classList.toggle("too-many", n > A.max_combos);
+  if (n > A.max_combos) countEl.textContent += ` (max ${A.max_combos.toLocaleString()})`;
+  return n;
+}
+document.getElementById("ranges").addEventListener("input", countCombos);
+countCombos();
+const form = document.getElementById("form"), runBtn = document.getElementById("runBtn");
+form.addEventListener("submit", e => {
+  const n = countCombos();
+  if (n > A.max_combos) { e.preventDefault(); countEl.focus?.(); return; }
+  tIn.value = tIn.value.trim().toUpperCase();
+  runBtn.disabled = true; runBtn.textContent = `Running ${n.toLocaleString()} backtests…`;
+});
+window.addEventListener("pageshow", () => { runBtn.disabled = false; runBtn.textContent = "Run sweep"; });
+
+// ---- Results -----------------------------------------------------------------------
+const RES = DATA.result;
+if (RES) {
+  document.getElementById("results").hidden = false;
+  const rows = RES.rows, bench = RES.benchmark, varied = RES.params;
+  const rk = A.rank, M = METRICS[rk];
+  const sign = M.better === "higher" ? -1 : 1;              // sort direction for "best first"
+  const chartUrl = r => `/?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${S.id}&` +
+    params.map(([k]) => `${k}=${r[k]}`).join("&");
+
+  // Verdict: did the in-sample winners hold up?
+  const O = RES.report, v = document.getElementById("verdict");
+  // "Best" for the verdict and the outlined square: top in-sample Sharpe ratio
+  const best = [...rows].filter(r => r.is_sharpe !== null).sort((a, b) => b.is_sharpe - a.is_sharpe)[0];
+  const setting = r => params.map(([k, p]) => `${esc(p.label || k).replace(/ \(.*\)$/, "")} ${r[k]}`).join(", ");
+  if (O && best) {
+    const c = O.rank_corr, cls = c >= 0.5 ? "good" : c >= 0.2 ? "weak" : "bad";
+    const words = c >= 0.5 ? "held up well: settings that did well in-sample mostly did well afterwards too"
+      : c >= 0.2 ? "held up only weakly: some link between in-sample and later results, but a lot of luck"
+      : "did not hold up: the in-sample ranking said almost nothing about the future (a sign of overfitting)";
+    v.classList.add(cls);
+    v.innerHTML = `<h2>The in-sample ranking ${words.split(":")[0]}</h2>
+      <p>${words.split(": ")[1][0].toUpperCase() + words.split(": ")[1].slice(1)}.
+      Ranked by Sharpe ratio, the best in-sample setting (<b>${setting(best)}</b>) came
+      <b>#${O.best_is_oos_rank} of ${O.combos}</b> out-of-sample.</p>
+      <div class="kpis">
+        <div class="kpi"><span>Best in-sample Sharpe</span><b>${O.best_is.toFixed(2)}</b></div>
+        <div class="kpi"><span>Same setting, out-of-sample</span><b>${O.best_is_oos.toFixed(2)}</b></div>
+        <div class="kpi"><span>Top 10 avg: in → out</span><b>${O.top_is_mean.toFixed(2)} → ${O.top_oos_mean.toFixed(2)}</b></div>
+        <div class="kpi"><span>Buy & hold, out-of-sample</span><b>${bench.oos_sharpe.toFixed(2)}</b></div>
+        <div class="kpi"><span>Rank correlation</span><b>${c.toFixed(2)}</b></div>
+      </div>
+      <p class="notice">${RES.count.toLocaleString()} combinations in ${RES.seconds.toFixed(1)} s` +
+      (RES.skipped ? ` · ${RES.skipped} skipped (${esc(RES.skip_reason)})` : "") +
+      `. Rank correlation: +1 means the in-sample order repeated exactly, 0 means no connection.</p>`;
+  }
+  const period = (a, b) => `${a} → ${b}`;
+  document.getElementById("isPeriod").textContent = period(RES.start, RES.split_before);
+  document.getElementById("oosPeriod").textContent = period(RES.split_date, RES.end);
+
+  // ---- Heatmaps (two varied settings) ----
+  const mapMetric = document.getElementById("mapMetric");
+  mapMetric.innerHTML = Object.entries(METRICS).map(([k, m]) => `<option value="${k}">${m.label}</option>`).join("");
+  mapMetric.value = rk;
+  const axes = params.filter(([k]) => varied.includes(k));
+  const mapsCard = document.getElementById("mapsCard");
+  const RAMP = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"];
+  const dark = () => css("color-scheme").includes("dark") || getComputedStyle(document.body).colorScheme === "dark";
+  const ramp = t => { const r = dark() ? [...RAMP].reverse() : RAMP; return r[Math.max(0, Math.min(r.length - 1, Math.round(t * (r.length - 1))))]; };
+  const tip = document.getElementById("tip");
+  const fmtRow = (r, side) => Object.entries(METRICS).map(([k, m]) =>
+    `${m.label}: <b>${r[side + "_" + k] === null ? "–" : m.fmt(r[side + "_" + k])}</b>`).join("<br>");
+
+  function drawMaps() {
+    if (axes.length < 1 || axes.length > 2) {
+      mapsCard.querySelector(".maps").hidden = true; mapsCard.querySelector(".legendbar").hidden = true;
+      document.getElementById("mapNote").textContent = "needs one or two settings with more than one value; see the table";
+      return;
+    }
+    const [xk, yk] = [axes[0][0], axes[1]?.[0]];
+    const allX = RES.axis_values[xk], allY = yk ? RES.axis_values[yk] : [null];
+    const key = mapMetric.value, m = METRICS[key];
+    document.getElementById("mapNote").textContent = `${m.label}: ${m.better === "lower" ? "darker = fewer" : "darker = better"}` +
+      (key === "trades" ? " trades" : "") + (["final", "trades"].includes(key) ? " · each map on its own scale" : " · same scale on both maps");
+    const byXY = new Map(rows.map(r => [`${r[xk]}|${yk ? r[yk] : ""}`, r]));
+    const cell = 22, padL = 52, padB = 40, padT = 8;
+    const W = padL + allX.length * cell + 8, H = padT + allY.length * cell + padB;
+    // One colour scale for both maps where the numbers are comparable across periods,
+    // so a lighter square out-of-sample really is worse. Final value and trade count
+    // depend on period length, so those maps are scaled separately.
+    const shared = !["final", "trades"].includes(key);
+    const valsFor = sides => rows.flatMap(r => sides.map(sd => r[sd + "_" + key])).filter(x => x !== null);
+    for (const side of ["is", "oos"]) {
+      const vals = valsFor(shared ? ["is", "oos"] : [side]);
+      let lo = Math.min(...vals), hi = Math.max(...vals);
+      const norm = x => hi === lo ? 0.5 : (m.better === "lower" ? (hi - x) : (x - lo)) / (hi - lo);
+      const xlab = axes[0][1].label || xk, ylab = yk ? (axes[1][1].label || yk) : "";
+      const xEvery = Math.ceil(allX.length / 12), yEvery = Math.ceil(allY.length / 14);
+      let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.label)} by ${esc(xlab)}${yk ? " and " + esc(ylab) : ""}, ${side === "is" ? "in-sample" : "out-of-sample"}">`;
+      allY.forEach((yv, j) => {
+        const y = padT + (allY.length - 1 - j) * cell;
+        if (yk && j % yEvery === 0) svg += `<text x="${padL - 6}" y="${y + cell / 2 + 4}" text-anchor="end">${yv}</text>`;
+        allX.forEach((xv, i) => {
+          const x = padL + i * cell, r = byXY.get(`${xv}|${yk ? yv : ""}`);
+          if (!r || r[side + "_" + key] === null) { svg += `<rect x="${x + 1}" y="${y + 1}" width="${cell - 2}" height="${cell - 2}" rx="3" fill="${css("--empty")}"></rect>`; return; }
+          const isBest = r === best;
+          svg += `<rect class="cell${isBest ? " best" : ""}" tabindex="0" data-i="${rows.indexOf(r)}" data-side="${side}" x="${x + 1}" y="${y + 1}" width="${cell - 2}" height="${cell - 2}" rx="3" fill="${ramp(norm(r[side + "_" + key]))}"></rect>`;
+        });
+      });
+      allX.forEach((xv, i) => { if (i % xEvery === 0) svg += `<text x="${padL + i * cell + cell / 2}" y="${padT + allY.length * cell + 14}" text-anchor="middle">${xv}</text>`; });
+      svg += `<text x="${padL + allX.length * cell / 2}" y="${H - 6}" text-anchor="middle">${esc(xlab)} →</text>`;
+      if (yk) svg += `<text transform="translate(12 ${padT + allY.length * cell / 2}) rotate(-90)" text-anchor="middle">${esc(ylab)} →</text>`;
+      svg += `</svg>`;
+      document.getElementById(side === "is" ? "mapIS" : "mapOOS").innerHTML = svg;
+      if (side === "is") {
+        document.getElementById("lgLow").textContent = m.fmt(m.better === "lower" ? hi : lo);
+        document.getElementById("lgHigh").textContent = m.fmt(m.better === "lower" ? lo : hi);
+        document.getElementById("lgRamp").style.background = `linear-gradient(90deg, ${ramp(0)}, ${ramp(0.5)}, ${ramp(1)})`;
+      }
+    }
+  }
+  drawMaps();
+  mapMetric.addEventListener("change", drawMaps);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawMaps);
+  new MutationObserver(drawMaps).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const showTip = (el, ev) => {
+    const r = rows[+el.dataset.i], side = el.dataset.side;
+    tip.innerHTML = `<b>${setting(r)}</b><br>${side === "is" ? "In-sample" : "Out-of-sample"}<br>${fmtRow(r, side)}`;
+    tip.hidden = false;
+    const bx = ev?.clientX ?? el.getBoundingClientRect().right, by = ev?.clientY ?? el.getBoundingClientRect().top;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    tip.style.left = Math.min(innerWidth - w - 8, bx + 14) + "px";
+    tip.style.top = Math.max(8, Math.min(innerHeight - h - 8, by + 14)) + "px";
+  };
+  for (const id of ["mapIS", "mapOOS"]) {
+    const el = document.getElementById(id);
+    el.addEventListener("mousemove", e => { const c = e.target.closest("rect.cell"); c ? showTip(c, e) : (tip.hidden = true); });
+    el.addEventListener("mouseleave", () => { tip.hidden = true; });
+    el.addEventListener("focusin", e => { const c = e.target.closest("rect.cell"); if (c) showTip(c); });
+    el.addEventListener("focusout", () => { tip.hidden = true; });
+    el.addEventListener("click", e => { const c = e.target.closest("rect.cell"); if (c) location.href = chartUrl(rows[+c.dataset.i]); });
+    el.addEventListener("keydown", e => { const c = e.target.closest("rect.cell"); if (c && (e.key === "Enter" || e.key === " ")) location.href = chartUrl(rows[+c.dataset.i]); });
+  }
+
+  // ---- Table ----
+  const cols = [
+    ...params.map(([k, p]) => ({ key: k, label: k, grp: "", fmt: v => v })),
+    ...["final", "cagr", "sharpe", "max_dd", "trades", "win_rate"].map((k, i) => ({ key: "is_" + k, label: METRICS[k].label, grp: "is", sep: i === 0, fmt: METRICS[k].fmt, signed: ["cagr", "max_dd"].includes(k) })),
+    ...["final", "cagr", "sharpe", "max_dd", "trades"].map((k, i) => ({ key: "oos_" + k, label: METRICS[k].label, grp: "oos", sep: i === 0, fmt: METRICS[k].fmt, signed: ["cagr", "max_dd"].includes(k) })),
+  ];
+  let sortKey = "is_" + rk, sortDir = sign, limit = 50;
+  const thead = document.querySelector("#table thead"), tbody = document.querySelector("#table tbody");
+  const moreBtn = document.getElementById("moreBtn");
+  function drawTable() {
+    const nIS = cols.filter(c => c.grp === "is").length, nOOS = cols.filter(c => c.grp === "oos").length;
+    thead.innerHTML = `<tr><th class="grp" colspan="${params.length + 1}"></th><th class="grp sep" colspan="${nIS}">In-sample · ${esc(RES.start)} → ${esc(RES.split_before)}</th><th class="grp sep" colspan="${nOOS}">Out-of-sample · ${esc(RES.split_date)} → ${esc(RES.end)}</th></tr>` +
+      `<tr><th>#</th>` + cols.map(c => `<th class="${c.sep ? "sep " : ""}${c.key === sortKey ? "sorted" : ""}" aria-sort="${c.key === sortKey ? (sortDir < 0 ? "descending" : "ascending") : "none"}"><button type="button" data-k="${c.key}">${esc(c.label)}${c.key === sortKey ? (sortDir < 0 ? " ↓" : " ↑") : ""}</button></th>`).join("") + `</tr>`;
+    const sorted = [...rows].sort((a, b) => {
+      const x = a[sortKey], y = b[sortKey];
+      if (x === null) return 1; if (y === null) return -1;
+      return sortDir * (x - y);
+    });
+    const cellHtml = (c, r) => {
+      const v = r[c.key];
+      const cls = [c.sep ? "sep" : "", c.signed && v !== null ? (v >= 0 ? "pos" : "neg") : ""].join(" ").trim();
+      return `<td class="${cls}">${v === null || v === undefined ? "–" : c.fmt(v)}</td>`;
+    };
+    const benchRow = `<tr class="bench"><td>–</td>` + cols.map(c => c.grp ? cellHtml(c, bench) : `<td>${c === cols[0] ? "Buy & hold" : ""}</td>`).join("") + `</tr>`;
+    tbody.innerHTML = benchRow + sorted.slice(0, limit).map((r, i) =>
+      `<tr class="${r === best ? "top" : ""}"><td><a href="${chartUrl(r)}" title="Open on the chart">${i + 1}</a></td>` + cols.map(c => cellHtml(c, r)).join("") + `</tr>`).join("");
+    moreBtn.hidden = rows.length <= limit;
+    moreBtn.textContent = `Show all ${rows.length.toLocaleString()} rows`;
+    document.getElementById("tableNote").textContent = `${rows.length.toLocaleString()} rows · click a column to sort · click # to open on the chart`;
+  }
+  thead.addEventListener("click", e => {
+    const b = e.target.closest("button[data-k]"); if (!b) return;
+    const k = b.dataset.k;
+    if (k === sortKey) sortDir = -sortDir;
+    else { sortKey = k; const base = k.replace(/^(is|oos)_/, ""); sortDir = METRICS[base]?.better === "lower" ? 1 : -1; }
+    drawTable();
+  });
+  moreBtn.addEventListener("click", () => { limit = Infinity; drawTable(); });
+  drawTable();
+}
+</script>

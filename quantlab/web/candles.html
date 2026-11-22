@@ -93,6 +93,7 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .appbar input:focus-visible, .appbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .appbar button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; font-size: 13px; }
 .appbar button.run:disabled { opacity: .7; cursor: progress; }
+.navlink { align-self: center; font: 500 13px/1 var(--mono); color: var(--accent); }
 .desc { flex: 1 1 260px; min-width: 0; align-self: center; color: var(--muted); font-size: 13px; }
 footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
 footer a { color: inherit; }
@@ -110,6 +111,7 @@ footer a { color: inherit; }
     <span id="settingsIn" class="params"></span>
     <button type="submit" class="run" id="runBtn">Run</button>
     <button type="button" id="resetBtn" hidden title="Put every setting back to the strategy's default">Reset</button>
+    <a class="navlink" id="optLink" href="/optimize" title="Try every combination of this strategy's settings">Optimize →</a>
     <span class="desc" id="stratDesc"></span>
   </form>
   <header>
@@ -427,6 +429,10 @@ if (DATA.app) {
     run.textContent = A.tickers.includes(t) ? "Loading…" : `Downloading ${t}…`;
   });
   window.addEventListener("pageshow", () => { run.disabled = false; run.textContent = "Run"; });
+  const optLink = document.getElementById("optLink");
+  const sweepable = Object.keys(params).length > 0;
+  optLink.hidden = !sweepable;
+  if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${encodeURIComponent(A.strategy)}`;
   form.hidden = false;
 }
 
