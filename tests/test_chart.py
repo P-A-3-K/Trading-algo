@@ -40,7 +40,7 @@ def test_plots_in_payload():
                         strategy="SmaCrossover(fast=2)")
     data = json.loads(html.split("const DATA = ")[1].split(";\n")[0])
     assert data["strategy"] == "SmaCrossover(fast=2)"
-    assert data["plots"][0] == {"name": "SMA 2", "pane": "price", "color": None,
+    assert data["plots"][0] == {"name": "SMA 2", "pane": "price", "color": None, "style": "line",
                                 "points": [{"time": "2024-01-03", "value": 7.25}]}  # NaN skipped
     assert data["plots"][1]["pane"] == "lower"
 

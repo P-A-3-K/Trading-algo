@@ -113,3 +113,26 @@ def test_check_command(tmp_path, monkeypatch, capsys):
     bad.write_text("x = (\n", encoding="utf-8")
     assert check.main([str(bad)]) == 1
     assert check.main([str(tmp_path / "missing.py")]) == 2
+
+
+def test_fvg_strategy_on_hand_made_bars():
+    """A bullish FVG, a swing low before it, a retest, entry at next open, exit at target."""
+    import pandas as pd
+    from strategies.fvg import FairValueGap
+    #        0    1    2    3    4    5    6    7    8    9   10   11
+    low  = [100, 98,  95,  99, 101, 102, 108, 112, 109, 110, 113, 118]
+    high = [102, 101, 99,  101, 103, 104, 113, 116, 114, 114, 121, 124]
+    openp = [101, 100, 97, 100, 102, 103, 110, 113, 111, 111, 114, 119]
+    close = [101, 99,  98,  100, 102, 104, 112, 114, 112, 113, 120, 122]
+    bars = pd.DataFrame({"open": openp, "high": high, "low": low, "close": close, "volume": 1.0},
+                        index=pd.bdate_range("2024-01-01", periods=12), dtype=float)
+    # swing low at bar 2 (95), confirmed at bar 4; FVG: bar 5 high 104 < bar 7 low 112 -> zone 104..112
+    # bar 8 low 109 <= 112: first touch -> enter at bar 9 open 111; risk 111-95=16; target 111+2*16=143
+    out = FairValueGap(rr=2.0, swing=2, risk_pct=10).run(bars)
+    (t,) = out.trades
+    assert (t.side, t.entry_date, t.entry_price, t.stop, t.target) == (1, bars.index[9], 111.0, 95.0, 143.0)
+    assert t.exit_date is None                                  # target not reached yet
+    assert t.size == pytest.approx(min(1.0, 0.10 / (16 / 111)))  # 10% risk sizing
+    out2 = FairValueGap(rr=0.5, swing=2, risk_pct=10).run(bars)  # target 111 + 8 = 119
+    (t2,) = out2.trades
+    assert (t2.exit_date, t2.exit_price, t2.exit_reason) == (bars.index[10], 119.0, "target")

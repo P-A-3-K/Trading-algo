@@ -62,11 +62,17 @@ def nice_step(span: float, is_int: bool, target: int = 19) -> float:
 
 
 def default_ranges(cls) -> dict:
-    """Starting from/to/step for each setting: its allowed range in ~20 round steps."""
+    """Starting from/to/step for each setting: its allowed range in ~20 round steps.
+
+    Only the first two settings vary by default (the rest stay at their default),
+    so a strategy with many settings doesn't start with a huge grid.
+    """
     out = {}
-    for k, p in cls.params.items():
+    for n, (k, p) in enumerate(cls.params.items()):
         lo = p.min if p.min is not None else p.default
         hi = p.max if p.max is not None else p.default
+        if n >= 2:
+            lo = hi = p.default
         if hi == lo:
             out[k] = [p.default, p.default, 1 if p.is_int else 0.1]
             continue

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .backtest import run_backtest
+from .backtest import run_backtest, simulate
 from .metrics import cagr, max_drawdown, round_trips, sharpe
 
 MAX_COMBINATIONS = 5000
@@ -101,7 +101,7 @@ def sweep(bars: pd.DataFrame, cls, ranges: dict, split: float = 0.7,
         except ValueError as e:                 # e.g. fast >= slow
             skipped.append((settings, str(e)))
             continue
-        bt = run_backtest(bars["close"], strategy.run(bars).positions, cost_bps)
+        bt = simulate(bars, strategy.run(bars), cost_bps)
         row = dict(settings)
         row.update(segment_stats(bt.returns.iloc[:cut], bt.positions.iloc[:cut], "is"))
         # OOS starts flat-or-holding exactly as the strategy was: no fresh entry cost

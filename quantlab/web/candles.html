@@ -195,6 +195,7 @@ const plots = (DATA.plots || []).map((p, i) => {
     lineWidth: p.pane === "lower" && /level|threshold|entry|exit/i.test(p.name) ? 1 : 2,
     lineStyle: /level|threshold/i.test(p.name) ? LW.LineStyle.Dashed : LW.LineStyle.Solid,
     priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: pane === 0,
+    lineType: p.style === "step" ? LW.LineType.WithSteps : LW.LineType.Simple,
   }, pane);
   series.setData(p.points);
   return { ...p, series, token: PALETTE[i % PALETTE.length],

@@ -45,15 +45,25 @@ def candles(df: pd.DataFrame, adjusted: bool = True) -> list:
 
 
 def line_points(values: pd.Series) -> list:
-    """A plot's values as chart points; gaps (NaN, e.g. warm-up days) are skipped."""
-    values = values.dropna()
-    return [{"time": d.strftime("%Y-%m-%d"), "value": round(float(v), 6)}
-            for d, v in zip(values.index, values.values)]
+    """A plot's values as chart points.
+
+    Leading/trailing gaps (warm-up days) are dropped; gaps in the middle become
+    empty points so the chart breaks the line instead of joining across them
+    (e.g. a stop-loss line that only exists while a trade is open).
+    """
+    valid = values.notna()
+    if not valid.any():
+        return []
+    first, last = valid.idxmax(), valid[::-1].idxmax()
+    span = values.loc[first:last]
+    return [{"time": d.strftime("%Y-%m-%d")} if v != v else
+            {"time": d.strftime("%Y-%m-%d"), "value": round(float(v), 6)}
+            for d, v in zip(span.index, span.values)]
 
 
 def plots_payload(plots: list) -> list:
     """Strategy plots (quantlab.strategy.Plot) in the format the page draws."""
-    return [{"name": p.name, "pane": p.pane, "color": p.color,
+    return [{"name": p.name, "pane": p.pane, "color": p.color, "style": p.style,
              "points": line_points(p.values)} for p in plots]
 
 
@@ -159,12 +169,12 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
     df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
     plots, fills, equity, stats, label = [], None, None, None, ""
     if strategy is not None:
-        from .backtest import run_backtest, trades
+        from .backtest import fills_of, run_backtest, simulate
         from .metrics import full_stats
         bars = dl.load_bars(ticker)
         out = strategy.run(bars)
-        plots, fills = out.plots, trades(out.positions, bars["close"])
-        strat = run_backtest(bars["close"], out.positions)
+        plots, fills = out.plots, fills_of(bars, out)
+        strat = simulate(bars, out)
         bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
         equity = equity_payload(strat.returns, bench.returns)
         stats = stats_payload(full_stats(strat.returns, strat.positions, len(fills)),

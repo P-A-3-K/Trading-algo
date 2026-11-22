@@ -24,7 +24,7 @@ def main(argv=None) -> int:
         return 2
 
     from . import discovery
-    from .backtest import run_backtest, trades
+    from .backtest import fills_of, run_backtest, simulate
     from .download import load_bars
     from .metrics import full_stats
 
@@ -61,9 +61,9 @@ def main(argv=None) -> int:
             ok = False
             print(f"  FAIL  crashed on {ticker}: {type(e).__name__}: {e}")
             continue
-        bt = run_backtest(bars["close"], out.positions)
+        bt = simulate(bars, out)
         bh = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
-        n = len(trades(out.positions, bars["close"]))
+        n = len(fills_of(bars, out))
         s, b = full_stats(bt.returns, bt.positions, n), full_stats(bh.returns, bh.positions, 1)
         span = f"{bars.index[0].date()} to {bars.index[-1].date()}"
         print(f"\n  {repr(strategy)} on {ticker}, {span}:")

@@ -74,6 +74,26 @@ class Plot:
     values: pd.Series
     pane: str = "price"            # "price" draws over the candles, "lower" below them
     color: Optional[str] = None    # None lets the app pick
+    style: str = "line"            # "line", or "step" for levels (stops, zones): flat with jumps
+
+
+@dataclass
+class Trade:
+    """One trade with exact prices, for strategies that use orders (stops, targets...).
+
+    entry/exit happen AT the given prices on the given days (e.g. at the open,
+    or at a stop level during the day). exit_date None = still open at the end.
+    side: 1 = long, -1 = short. size: fraction of the account, 0 to 1.
+    """
+    entry_date: pd.Timestamp
+    entry_price: float
+    side: int
+    size: float = 1.0
+    exit_date: Optional[pd.Timestamp] = None
+    exit_price: Optional[float] = None
+    stop: Optional[float] = None
+    target: Optional[float] = None
+    exit_reason: str = ""
 
 
 @dataclass
@@ -81,6 +101,7 @@ class StrategyResult:
     positions: pd.Series
     plots: list = field(default_factory=list)
     params: dict = field(default_factory=dict)
+    trades: Optional[list] = None     # set for trade-based strategies (self.trade)
 
 
 class Strategy:
@@ -96,7 +117,7 @@ class Strategy:
         self.settings = {k: p.coerce(k, settings.get(k, p.default))
                          for k, p in self.params.items()}
         self.validate()
-        self._plots = []
+        self._plots, self._trades = [], []
 
     # Settings read like attributes: self.fast, self.slow, ...
     def __getattr__(self, item):
@@ -111,16 +132,49 @@ class Strategy:
     def compute(self, bars: pd.DataFrame) -> pd.Series:
         raise NotImplementedError("A strategy must implement compute(bars)")
 
-    def plot(self, name: str, values: pd.Series, pane: str = "price", color: str = None):
-        """Ask the app to draw a line. Call it from compute()."""
+    def plot(self, name: str, values: pd.Series, pane: str = "price", color: str = None,
+             style: str = "line"):
+        """Ask the app to draw a line. Call it from compute().
+
+        style="step" draws levels (a stop, a zone edge) as flat lines that jump,
+        instead of joining one level to the next with a slope.
+        """
         if pane not in ("price", "lower"):
             raise ValueError("pane must be 'price' or 'lower'")
-        self._plots.append(Plot(name, values, pane, color))
+        if style not in ("line", "step"):
+            raise ValueError("style must be 'line' or 'step'")
+        self._plots.append(Plot(name, values, pane, color, style))
+
+    def trade(self, entry_date, entry_price, side, size=1.0, exit_date=None, exit_price=None,
+              stop=None, target=None, exit_reason=""):
+        """Record a trade with exact prices (for strategies with stops/targets).
+
+        A strategy that records trades can return None from compute(): the
+        position held at each day's close is worked out from the trades.
+        """
+        if side not in (1, -1):
+            raise ValueError("side must be 1 (long) or -1 (short)")
+        if not 0 < size <= 1 + 1e-9:
+            raise ValueError("size must be above 0 and at most 1")
+        if (exit_date is None) != (exit_price is None):
+            raise ValueError("give both exit_date and exit_price, or neither")
+        self._trades.append(Trade(entry_date, float(entry_price), side, float(size), exit_date,
+                                  None if exit_price is None else float(exit_price),
+                                  stop, target, exit_reason))
 
     def run(self, bars: pd.DataFrame) -> StrategyResult:
         """Compute positions and plots, and check the output is usable."""
-        self._plots = []
+        self._plots, self._trades = [], []
         positions = self.compute(bars)
+        trades = None
+        if self._trades or positions is None:
+            from .backtest import held_positions
+            trades = sorted(self._trades, key=lambda t: t.entry_date)
+            for a, b in zip(trades, trades[1:]):
+                if a.exit_date is None or b.entry_date < a.exit_date:
+                    raise ValueError(f"{self.name}: trades overlap ({a.entry_date.date()} and "
+                                     f"{b.entry_date.date()}); one trade at a time")
+            positions = held_positions(bars.index, trades)
         if not isinstance(positions, pd.Series):
             raise TypeError(f"{self.name}: compute() must return a pandas Series")
         if not positions.index.equals(bars.index):
@@ -130,7 +184,7 @@ class Strategy:
         if (positions.abs() > 1 + 1e-9).any():
             raise ValueError(f"{self.name}: positions must be between -1 and 1")
         return StrategyResult(positions.rename(self.name), list(self._plots),
-                              dict(self.settings))
+                              dict(self.settings), trades)
 
     @classmethod
     def info(cls) -> dict:

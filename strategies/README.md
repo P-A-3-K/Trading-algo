@@ -34,11 +34,29 @@ code to change, no restart: save the file and refresh the browser.
 | A setting | `self.my_setting` (from `params`) |
 | Draw a line on the candles | `self.plot("SMA 50", series)` |
 | Draw in the panel below | `self.plot("RSI", series, pane="lower")` |
+| Draw a level (stop, zone edge) as flat steps | `self.plot("Stop", series, style="step")` |
 | Always invested / always in cash | `pd.Series(1.0, index=bars.index)` / `0.0` |
 | Buy on X, sell on Y, hold in between | `s = pd.Series(float("nan"), index=bars.index); s[X] = 1.0; s[Y] = 0.0; return s.ffill().fillna(0.0)` |
 
 **Positions:** `1` = fully invested, `0` = cash, `-1` = fully short, `0.5` = half.
 The position you return for a day is decided at that day's close and earns from the next day.
+
+## Strategies with stops, targets or exact entry prices
+
+Positions are traded at the **close** by default. For orders at exact prices
+(enter at the next open, exit at a stop or take-profit level), record each trade
+instead and `return None` from `compute()`:
+
+```python
+self.trade(entry_date, entry_price, side=1, size=0.5,        # side 1 long / -1 short; size 0-1
+           exit_date=exit_date, exit_price=exit_price,        # leave out while still open
+           stop=stop, target=target, exit_reason="target")
+```
+
+The backtester then values the account from those exact prices, and the chart puts
+the arrows at them. Only use prices a real order could get: today's open, or a level
+inside today's high-low range (if both your stop and target are inside the same day's
+range, assume the stop: daily bars don't show which came first). See `fvg.py`.
 
 ## The rules that keep backtests honest
 
@@ -56,4 +74,5 @@ The position you return for a day is decided at that day's close and earns from 
 |---|---|
 | `_template.py` | Fully commented starter (RSI mean reversion). Hidden from the app because of the `_`. |
 | `donchian_breakout.py` | Example: buy new N-day highs, sell new M-day lows. |
+| `fvg.py` | Fair value gap retest: next-open entry, swing stop, reward:risk target, risk-% sizing, long & short. Uses `self.trade(...)`. |
 | `README.md` | This guide. |
