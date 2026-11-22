@@ -2,6 +2,21 @@
 
 Each lesson adds one feature to the software and teaches the idea behind it.
 
+## Quick start
+
+**Windows:** double-click **`start.bat`**. **Mac/Linux:** run `./start.sh`.
+
+The first time, it creates a private Python environment (`.venv`) and installs the
+packages (about a minute). After that it starts in a second or two. Your browser
+opens QuantLab at http://127.0.0.1:8000; close the window or press Ctrl+C to stop.
+
+To get the newest version and start: double-click **`update.bat`** (or `./update.sh`).
+
+Needs Python 3.10+ ([python.org](https://www.python.org/downloads/), tick
+"Add python.exe to PATH" on Windows) and, for updates, Git.
+
+## Command line
+
 ```bash
 pip install pandas numpy requests pandas_market_calendars pytest
 python -m quantlab.app                  # the QuantLab web app: http://127.0.0.1:8000
