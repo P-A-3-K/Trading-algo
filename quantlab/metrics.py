@@ -5,23 +5,45 @@ import pandas as pd
 TRADING_DAYS = 252
 
 
-def cagr(returns: pd.Series) -> float:
+def bars_per_day(index) -> float:
+    """Typical number of bars in one trading day: 1 for daily data, ~190 for
+    5-minute bars with pre-market and after-hours."""
+    if not isinstance(index, pd.DatetimeIndex) or len(index) == 0:
+        return 1.0
+    counts = pd.Series(1, index=index).groupby(index.date).size()
+    return float(max(1.0, counts.median()))
+
+
+def periods_per_year(returns) -> float:
+    """How many bars make a year, worked out from the data's own timestamps.
+
+    Daily: 252. Intraday: 252 x bars per day. This is what turns per-bar numbers
+    into per-year numbers (return per year, volatility, Sharpe...).
+    """
+    index = returns.index if hasattr(returns, "index") else None
+    return TRADING_DAYS * bars_per_day(index)
+
+
+def cagr(returns: pd.Series, ppy: float = None) -> float:
     """Compound annual growth rate."""
+    ppy = ppy or periods_per_year(returns)
     total = (1 + returns).prod()
-    years = len(returns) / TRADING_DAYS
+    years = len(returns) / ppy
     return total ** (1 / years) - 1
 
 
-def annual_volatility(returns: pd.Series) -> float:
-    return returns.std() * np.sqrt(TRADING_DAYS)
+def annual_volatility(returns: pd.Series, ppy: float = None) -> float:
+    ppy = ppy or periods_per_year(returns)
+    return returns.std() * np.sqrt(ppy)
 
 
-def sharpe(returns: pd.Series, risk_free=0.0) -> float:
+def sharpe(returns: pd.Series, risk_free=0.0, ppy: float = None) -> float:
     """Return per unit of risk. >1 is good, >2 on real data is suspicious."""
-    excess = returns - risk_free / TRADING_DAYS
+    ppy = ppy or periods_per_year(returns)
+    excess = returns - risk_free / ppy
     if excess.std() == 0:
         return 0.0
-    return excess.mean() / excess.std() * np.sqrt(TRADING_DAYS)
+    return excess.mean() / excess.std() * np.sqrt(ppy)
 
 
 def max_drawdown(returns: pd.Series) -> float:
@@ -40,7 +62,7 @@ def summarize(returns: pd.Series) -> dict:
     }
 
 
-def sortino(returns: pd.Series) -> float:
+def sortino(returns: pd.Series, ppy: float = None) -> float:
     """Like Sharpe, but only counts DOWNSIDE volatility as risk.
 
     Big up-days don't hurt you, so they shouldn't count against a strategy.
@@ -49,7 +71,7 @@ def sortino(returns: pd.Series) -> float:
     dd = np.sqrt((downside ** 2).sum() / len(returns)) if len(returns) else 0.0
     if dd == 0:
         return 0.0
-    return returns.mean() / dd * np.sqrt(TRADING_DAYS)
+    return returns.mean() / dd * np.sqrt(ppy or periods_per_year(returns))
 
 
 def calmar(returns: pd.Series) -> float:

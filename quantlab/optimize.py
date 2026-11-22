@@ -146,19 +146,19 @@ WF_MAX_COMBINATIONS = 2000
 YEAR = 252
 
 
-def _metric(R: np.ndarray, H: np.ndarray, metric: str) -> np.ndarray:
+def _metric(R: np.ndarray, H: np.ndarray, metric: str, ppy: float = YEAR) -> np.ndarray:
     """Score every row (one combination) of a slice of daily returns; higher = better."""
     n = R.shape[1]
     if metric == "sharpe":
         sd = R.std(axis=1)
         with np.errstate(divide="ignore", invalid="ignore"):
-            score = np.where(sd > 0, R.mean(axis=1) / sd * np.sqrt(YEAR), -np.inf)
+            score = np.where(sd > 0, R.mean(axis=1) / sd * np.sqrt(ppy), -np.inf)
         return score
     growth = np.prod(1 + R, axis=1)
     if metric == "final":
         return growth
     if metric == "cagr":
-        return growth ** (YEAR / n) - 1
+        return growth ** (ppy / n) - 1
     if metric == "max_dd":
         eq = np.cumprod(1 + R, axis=1)
         return (eq / np.maximum.accumulate(eq, axis=1) - 1).min(axis=1)
@@ -191,13 +191,18 @@ def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
     anchored: training always starts at the first day and grows.
     """
     t0 = time.time()
-    train, test = int(round(train_years * YEAR)), int(round(test_years * YEAR))
-    if train < YEAR // 2 or test < 20:
-        raise ValueError("training needs at least half a year and testing at least 20 days")
+    from .metrics import bars_per_day
+    bpd = bars_per_day(bars.index)
+    ppy = YEAR * bpd                         # bars per year (intraday: many per day)
+    train, test = int(round(train_years * ppy)), int(round(test_years * ppy))
+    if train < max(20, 5 * bpd) or test < max(5, bpd):
+        raise ValueError("training needs at least 5 trading days (20 bars) and testing "
+                         "at least 1 trading day (5 bars)")
     n = len(bars)
     if train + test > n:
-        raise ValueError(f"not enough history: {n / YEAR:.1f} years, but training + testing "
-                         f"needs {(train + test) / YEAR:.1f}")
+        have, need = n / bpd, (train + test) / bpd
+        raise ValueError(f"not enough history: {have:.0f} trading days, but training + testing "
+                         f"needs {need:.0f}")
     combos, skipped = [], []
     for settings in grid(cls, ranges):
         try:
@@ -222,7 +227,7 @@ def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
     while start < n:
         end = min(start + test, n)
         lo = 0 if anchored else start - train
-        score = _metric(R[:, lo:start], H[:, lo:start], rank)
+        score = _metric(R[:, lo:start], H[:, lo:start], rank, ppy)
         best = int(np.nanargmax(np.where(np.isfinite(score), score, -np.inf)))
         wf_r[start:end] = R[best, start:end]
         wf_h[start:end] = H[best, start:end]
@@ -234,16 +239,16 @@ def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
             "test_start": idx[start], "test_end": idx[end - 1],
             "settings": dict(combos[best][0]),
             "train_score": float(score[best]),
-            "train_cagr": float(np.prod(1 + R[best, lo:start]) ** (YEAR / (start - lo)) - 1),
+            "train_cagr": float(np.prod(1 + R[best, lo:start]) ** (ppy / (start - lo)) - 1),
             "test_return": float(np.prod(1 + seg) - 1),
-            "test_cagr": float(np.prod(1 + seg) ** (YEAR / len(seg)) - 1),
-            "test_sharpe": float(seg.mean() / seg.std() * np.sqrt(YEAR)) if seg.std() > 0 else 0.0,
+            "test_cagr": float(np.prod(1 + seg) ** (ppy / len(seg)) - 1),
+            "test_sharpe": float(seg.mean() / seg.std() * np.sqrt(ppy)) if seg.std() > 0 else 0.0,
         })
         prev, start = best, end
 
     first = train
     span = idx[first:]
-    hind = _metric(R[:, first:], H[:, first:], rank)
+    hind = _metric(R[:, first:], H[:, first:], rank, ppy)
     hbest = int(np.nanargmax(np.where(np.isfinite(hind), hind, -np.inf)))
     bh = run_backtest(bars["close"], pd.Series(1.0, index=idx), cost_bps).returns.iloc[first:]
     return WalkForwardResult(

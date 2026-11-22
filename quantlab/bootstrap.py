@@ -42,7 +42,7 @@ def _block_sums(r: np.ndarray, block: int):
     return c[block:block + len(r)] - c[:len(r)]
 
 
-def _stats(r: np.ndarray, starts: np.ndarray, block: int):
+def _stats(r: np.ndarray, starts: np.ndarray, block: int, ppy: float = YEAR):
     """Sharpe and CAGR of each alternative history (rows of block start indices)."""
     n = starts.shape[1] * block
     s1 = _block_sums(r, block)[starts].sum(axis=1)
@@ -51,19 +51,23 @@ def _stats(r: np.ndarray, starts: np.ndarray, block: int):
     mean = s1 / n
     var = np.maximum(s2 / n - mean ** 2, 0) * n / (n - 1)
     with np.errstate(divide="ignore", invalid="ignore"):
-        sharpe = np.where(var > 0, mean / np.sqrt(var) * np.sqrt(YEAR), 0.0)
-    cagr = np.exp(lg * YEAR / n) - 1
+        sharpe = np.where(var > 0, mean / np.sqrt(var) * np.sqrt(ppy), 0.0)
+    cagr = np.exp(lg * ppy / n) - 1
     return sharpe, cagr
 
 
-def _actual(r: np.ndarray):
+def _actual(r: np.ndarray, ppy: float = YEAR):
     sd = r.std(ddof=1)
-    sharpe = float(r.mean() / sd * np.sqrt(YEAR)) if sd > 0 else 0.0
-    return sharpe, float(np.exp(np.log1p(r).sum() * YEAR / len(r)) - 1)
+    sharpe = float(r.mean() / sd * np.sqrt(ppy)) if sd > 0 else 0.0
+    return sharpe, float(np.exp(np.log1p(r).sum() * ppy / len(r)) - 1)
 
 
-def bootstrap(returns, benchmark=None, samples: int = 5000, block: int = 21, seed: int = 0):
-    """Reshuffle daily returns into `samples` alternative histories.
+def bootstrap(returns, benchmark=None, samples: int = 5000, block: int = 21, seed: int = 0,
+              ppy: float = YEAR):
+    """Reshuffle per-bar returns into `samples` alternative histories.
+
+    block: bars per block (21 = about a month of daily bars; for intraday data
+    use about a day of bars). ppy: bars per year, to express results per year.
 
     Returns (strategy Bootstrap, benchmark Bootstrap or None, chance the strategy's
     Sharpe beats the benchmark's in the same reshuffled history, or None).
@@ -73,15 +77,15 @@ def bootstrap(returns, benchmark=None, samples: int = 5000, block: int = 21, see
         raise ValueError(f"need at least {3 * block} days of returns to bootstrap")
     rng = np.random.default_rng(seed)
     starts = rng.integers(0, len(r), size=(samples, len(r) // block))
-    s_sh, s_cg = _stats(r, starts, block)
-    strat = Bootstrap(s_sh, s_cg, *_actual(r))
+    s_sh, s_cg = _stats(r, starts, block, ppy)
+    strat = Bootstrap(s_sh, s_cg, *_actual(r, ppy))
     if benchmark is None:
         return strat, None, None
     b = np.asarray(benchmark, dtype=float)
     if len(b) != len(r):
         raise ValueError("strategy and benchmark returns must cover the same days")
-    b_sh, b_cg = _stats(b, starts, block)
-    bench = Bootstrap(b_sh, b_cg, *_actual(b))
+    b_sh, b_cg = _stats(b, starts, block, ppy)
+    bench = Bootstrap(b_sh, b_cg, *_actual(b, ppy))
     return strat, bench, float((s_sh > b_sh).mean())
 
 

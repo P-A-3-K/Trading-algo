@@ -122,7 +122,7 @@ def test_walk_forward_anchored_and_errors():
     with pytest.raises(ValueError, match="not enough history"):
         optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10)}, 5, 1)
     with pytest.raises(ValueError, match="at least"):
-        optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10)}, 0.1, 1)
+        optimize.walk_forward(b, SmaCrossover, {"fast": (10, 30, 10)}, 0.05, 1)   # ~13 days
 
 
 def test_walk_forward_metric_direction():
