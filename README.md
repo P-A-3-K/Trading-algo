@@ -8,6 +8,7 @@ python lessons/01_first_backtest.py
 python lessons/02_real_data.py          # downloads SPY & AAPL into data/ on first run
 python -m quantlab.download SPY QQQ     # download any tickers
 python lessons/03_data_checks.py        # find gaps in the data
+python -m quantlab.chart SPY            # candlestick chart -> reports/SPY.html
 pytest -q
 ```
 
@@ -16,6 +17,7 @@ pytest -q
 |---|---|
 | `quantlab/download.py` | Download real prices from Yahoo, cache them in `data/` |
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
+| `quantlab/chart.py` | Interactive candlestick chart page (TradingView Lightweight Charts, bundled in `quantlab/web/vendor`) |
 | `quantlab/data.py` | Prices, returns, random walks (synthetic data = a "no edge" control group) |
 | `quantlab/strategies.py` | A strategy is a function: prices -> position (1 long, 0 flat, -1 short) |
 | `quantlab/backtest.py` | Simulation, `shift(1)` against look-ahead bias, transaction costs |

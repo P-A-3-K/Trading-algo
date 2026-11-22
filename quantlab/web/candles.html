@@ -1,0 +1,164 @@
+<title>__TICKER__ Candles</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one trading screen. Header strip (ticker, price, controls), chart fills the rest, footer note. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #15191f; --muted: #5d6673; --line: #dfe3e8;
+  --grid: #eceff3; --up: #12855f; --down: #c8423b; --accent: #2f5fd0;
+  --vol-up: rgba(18,133,95,.28); --vol-down: rgba(200,66,59,.28);
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff;
+  --vol-up: rgba(47,191,138,.30); --vol-down: rgba(239,106,97,.30); color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff;
+  --vol-up: rgba(47,191,138,.30); --vol-down: rgba(239,106,97,.30); color-scheme: dark; }
+
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
+.wrap { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 12px;
+  padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); max-width: 1400px; margin: 0 auto; }
+header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.id { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; min-width: 0; }
+h1 { margin: 0; font: 600 26px/1 var(--sans); letter-spacing: .01em; }
+.price { font: 500 22px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.chg { font: 500 14px/1 var(--mono); font-variant-numeric: tabular-nums; }
+.chg.up { color: var(--up); } .chg.down { color: var(--down); }
+.sub { color: var(--muted); font-size: 12px; letter-spacing: .02em; }
+.controls { display: flex; gap: 6px; flex-wrap: wrap; }
+button { font: 500 12px/1 var(--mono); letter-spacing: .04em; color: var(--muted); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; cursor: pointer; }
+button:hover { color: var(--fg); }
+button[aria-pressed="true"] { color: var(--panel); background: var(--accent); border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sep { width: 1px; background: var(--line); margin: 0 4px; }
+.stage { position: relative; flex: 1; min-height: 360px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+#chart { position: absolute; inset: 0; }
+.legend { position: absolute; top: 10px; left: 12px; z-index: 3; pointer-events: none;
+  font: 12px/1.5 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 2px 12px; max-width: calc(100% - 24px); }
+.legend b { color: var(--fg); font-weight: 500; }
+footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
+footer a { color: inherit; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="id">
+      <h1 id="ticker">__TICKER__</h1>
+      <span class="price" id="last">–</span>
+      <span class="chg" id="chg"></span>
+      <span class="sub" id="span"></span>
+    </div>
+    <div class="controls" role="group" aria-label="Chart range">
+      <button type="button" data-months="1">1M</button>
+      <button type="button" data-months="6">6M</button>
+      <button type="button" data-months="12" aria-pressed="true">1Y</button>
+      <button type="button" data-months="60">5Y</button>
+      <button type="button" data-months="0">All</button>
+      <span class="sep" aria-hidden="true"></span>
+      <button type="button" id="log" aria-pressed="false" title="Logarithmic price scale: equal % moves look equal">Log</button>
+    </div>
+  </header>
+  <div class="stage">
+    <div class="legend" id="legend"></div>
+    <div id="chart"></div>
+  </div>
+  <footer>
+    <span id="note">Daily bars. Drag to scroll, scroll wheel or pinch to zoom.</span>
+    <span>Charts: TradingView Lightweight Charts™, © 2025 TradingView, Inc. <a href="https://www.tradingview.com/" target="_blank" rel="noopener">tradingview.com</a></span>
+  </footer>
+</div>
+
+<script>/*__LIBRARY__*/</script>
+<script>
+const DATA = /*__DATA__*/null;
+const LW = window.LightweightCharts;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = n => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const vol = n => n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(0) + "K" : String(n);
+const bars = DATA.bars;
+const last = bars[bars.length - 1], prev = bars[bars.length - 2] || last;
+
+const chart = LW.createChart(document.getElementById("chart"), {
+  autoSize: true,
+  layout: { fontFamily: css("--mono"), fontSize: 11 },
+  rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.24 } },
+  timeScale: { borderVisible: false, rightOffset: 4 },
+  crosshair: { mode: LW.CrosshairMode.Normal },
+});
+const candles = chart.addSeries(LW.CandlestickSeries, { borderVisible: false, priceLineVisible: false });
+const volume = chart.addSeries(LW.HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false });
+chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+
+function paint() {
+  const up = css("--up"), down = css("--down");
+  chart.applyOptions({
+    layout: { background: { type: "solid", color: css("--panel") }, textColor: css("--muted") },
+    grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } },
+    crosshair: { vertLine: { color: css("--muted"), labelBackgroundColor: css("--accent") },
+                 horzLine: { color: css("--muted"), labelBackgroundColor: css("--accent") } },
+  });
+  candles.applyOptions({ upColor: up, downColor: down, wickUpColor: up, wickDownColor: down });
+  const vu = css("--vol-up"), vd = css("--vol-down");
+  volume.setData(bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? vu : vd })));
+}
+candles.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
+paint();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paint);
+new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+// Header
+document.getElementById("last").textContent = fmt(last.close);
+const d = last.close / prev.close - 1, chg = document.getElementById("chg");
+chg.textContent = (d >= 0 ? "+" : "") + (d * 100).toFixed(2) + "%";
+chg.className = "chg " + (d >= 0 ? "up" : "down");
+document.getElementById("span").textContent =
+  `${bars[0].time} → ${last.time} · ${bars.length.toLocaleString()} days · ${DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted"}`;
+
+// Legend: the bar under the cursor, or the latest bar
+const legend = document.getElementById("legend");
+const byTime = new Map(bars.map((b, i) => [b.time, i]));
+function showBar(b) {
+  const i = byTime.get(b.time), p = i > 0 ? bars[i - 1].close : b.open;
+  const c = b.close / p - 1, col = c >= 0 ? "var(--up)" : "var(--down)";
+  legend.innerHTML = `<span><b>${b.time}</b></span><span>O <b>${fmt(b.open)}</b></span><span>H <b>${fmt(b.high)}</b></span>` +
+    `<span>L <b>${fmt(b.low)}</b></span><span>C <b>${fmt(b.close)}</b></span>` +
+    `<span style="color:${col}">${c >= 0 ? "+" : ""}${(c * 100).toFixed(2)}%</span><span>Vol <b>${vol(b.volume)}</b></span>`;
+}
+showBar(last);
+chart.subscribeCrosshairMove(p => {
+  if (p.time && p.seriesData.get(candles)) {
+    const key = typeof p.time === "string" ? p.time
+      : `${p.time.year}-${String(p.time.month).padStart(2, "0")}-${String(p.time.day).padStart(2, "0")}`;
+    showBar(bars[byTime.get(key)] || last);
+  } else showBar(last);
+});
+
+// Range buttons and log scale
+const rangeButtons = [...document.querySelectorAll("[data-months]")];
+function setRange(months) {
+  rangeButtons.forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.months === months)));
+  if (!months) { chart.timeScale().fitContent(); return; }
+  const end = new Date(last.time + "T00:00:00Z"), start = new Date(end);
+  start.setUTCMonth(start.getUTCMonth() - months);
+  const from = start.toISOString().slice(0, 10);
+  chart.timeScale().setVisibleRange({ from: from < bars[0].time ? bars[0].time : from, to: last.time });
+}
+rangeButtons.forEach(b => b.addEventListener("click", () => setRange(+b.dataset.months)));
+const logBtn = document.getElementById("log");
+logBtn.addEventListener("click", () => {
+  const on = logBtn.getAttribute("aria-pressed") !== "true";
+  logBtn.setAttribute("aria-pressed", String(on));
+  chart.priceScale("right").applyOptions({ mode: on ? LW.PriceScaleMode.Logarithmic : LW.PriceScaleMode.Normal });
+});
+setRange(12);
+</script>
