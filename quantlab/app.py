@@ -7,7 +7,7 @@ Pages and data it serves:
     /                                   chart page; choose with the address, e.g.
     /?ticker=QQQ&strategy=SmaCrossover&fast=20&slow=100
     /api/strategies                     every strategy with its settings (for the menus)
-    /api/tickers                        tickers already downloaded into data/
+    /api/tickers                        downloaded tickers, plus the popular list
     /api/backtest?ticker=SPY&strategy=MeanReversion&entry=1.5   the page's data as JSON
 
 It only listens on 127.0.0.1 (your own computer), so nobody else on your
@@ -24,7 +24,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import chart, strategies
+from . import chart, strategies, universe
 from . import download as dl
 
 DEFAULT_TICKER = "SPY"
@@ -80,7 +80,7 @@ class Handler(BaseHTTPRequestHandler):
             "strategy": type(strategy).__name__ if strategy else "none",
             "settings": dict(strategy.settings) if strategy else {},
             "strategies": strategies_info(),
-            "tickers": dl.cached_tickers(),
+            "tickers": universe.menu(dl.cached_tickers()),
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
                   "text/html; charset=utf-8")
@@ -89,7 +89,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"strategies": strategies_info()})
 
     def api_tickers(self, query):
-        self.send_json({"tickers": dl.cached_tickers()})
+        self.send_json({"tickers": dl.cached_tickers(),
+                        "popular": universe.menu(dl.cached_tickers())})
 
     def api_backtest(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER

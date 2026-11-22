@@ -42,3 +42,21 @@ def test_download_many_keeps_going(tmp_path, monkeypatch):
     out = dl.download_many(["AAA", "BAD", "BBB"], pause=0)
     assert str(out["BAD"]).startswith("failed")
     assert (tmp_path / "BBB.csv").exists()
+
+
+def test_parse_chart_handles_pre_1970_dates():
+    payload = {"chart": {"error": None, "result": [{
+        "timestamp": [-1325635200 + 14 * 3600],          # 1927-12-30, before the 1970 epoch
+        "indicators": {"quote": [{"open": [17.66], "high": [17.66], "low": [17.66],
+                                  "close": [17.66], "volume": [0]}],
+                       "adjclose": [{"adjclose": [17.66]}]}}]}}
+    df = dl.parse_chart(payload)
+    assert str(df.index[0].date()) == "1927-12-30"
+
+
+def test_popular_list_is_valid():
+    from quantlab.universe import POPULAR, popular_tickers
+    tickers = popular_tickers()
+    assert len(tickers) == len(set(tickers)) >= 40
+    for t in tickers:
+        assert dl.clean_ticker(t) == t

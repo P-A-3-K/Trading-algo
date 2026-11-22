@@ -98,8 +98,8 @@ footer a { color: inherit; }
     <span class="brand">QuantLab</span>
     <label class="field"><span>Ticker</span>
       <input id="tickerIn" name="ticker" list="tickerList" autocomplete="off" spellcheck="false"
-             maxlength="15" required pattern="[A-Za-z0-9][A-Za-z0-9.\-^=]{0,14}"
-             title="A ticker symbol, e.g. SPY, AAPL, BRK-B, ^GSPC"></label>
+             maxlength="16" required pattern="\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14}"
+             title="Pick from the list or type any Yahoo Finance symbol, e.g. SPY, AAPL, BRK-B, ^GSPC. ✓ = already downloaded"></label>
     <datalist id="tickerList"></datalist>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <span id="settingsIn"></span>
@@ -248,7 +248,7 @@ const d = last.close / prev.close - 1, chg = document.getElementById("chg");
 chg.textContent = (d >= 0 ? "+" : "") + (d * 100).toFixed(2) + "%";
 chg.className = "chg " + (d >= 0 ? "up" : "down");
 document.getElementById("span").textContent =
-  `${bars[0].time} → ${last.time} · ${bars.length.toLocaleString()} days · ${DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted"}`;
+  `${bars[0].time} → ${last.time} · ${bars.length.toLocaleString()} days · ${DATA.is_index ? "price index: dividends not included" : DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted"}`;
 
 // Legend: the bar under the cursor, or the latest bar
 const legend = document.getElementById("legend");
@@ -384,7 +384,10 @@ if (DATA.app) {
   const keep = document.getElementById("settingsIn"), run = document.getElementById("runBtn");
   const desc = document.getElementById("stratDesc");
   tIn.value = DATA.ticker;
-  document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
+  // Ticker box suggestions: name · group, with a mark for ones already downloaded
+  document.getElementById("tickerList").innerHTML = A.tickers.map(t =>
+    `<option value="${esc(t.symbol)}" label="${esc([t.name, t.group].filter(Boolean).join(" · ") + (t.saved ? " ✓" : ""))}"></option>`).join("");
+  const saved = new Set(A.tickers.filter(t => t.saved).map(t => t.symbol));
   const byId = Object.fromEntries(A.strategies.map(s => [s.id, s]));
   sIn.innerHTML = `<option value="none">None (candles only)</option>` +
     A.strategies.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("");
@@ -401,7 +404,7 @@ if (DATA.app) {
   form.addEventListener("submit", () => {
     const t = tIn.value.trim().toUpperCase(); tIn.value = t;
     run.disabled = true;
-    run.textContent = A.tickers.includes(t) ? "Loading…" : `Downloading ${t}…`;
+    run.textContent = saved.has(t) ? "Loading…" : `Downloading ${t}…`;
   });
   window.addEventListener("pageshow", () => { run.disabled = false; run.textContent = "Run"; });
   form.hidden = false;

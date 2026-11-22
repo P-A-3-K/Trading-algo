@@ -50,7 +50,11 @@ def test_plain_candles(server):
 
 
 def test_api_lists(server):
-    assert json.loads(get(server + "/api/tickers")[1]) == {"tickers": ["TEST"]}
+    tickers = json.loads(get(server + "/api/tickers")[1])
+    assert tickers["tickers"] == ["TEST"]
+    pop = {t["symbol"]: t for t in tickers["popular"]}
+    assert pop["SPY"]["name"] == "S&P 500" and pop["SPY"]["saved"] is False
+    assert pop["TEST"] == {"symbol": "TEST", "name": None, "group": "Your downloads", "saved": True}
     ids = [s["id"] for s in json.loads(get(server + "/api/strategies")[1])["strategies"]]
     assert ids == ["BuyAndHold", "SmaCrossover", "MeanReversion"]
 
@@ -78,7 +82,8 @@ def test_unknown_path(server):
 
 def test_ticker_validation():
     assert dl.clean_ticker(" brk-b ") == "BRK-B"
-    for bad in ["../x", "a/b", "", "TOO_LONG_TICKER_NAME", "x y"]:
+    assert dl.clean_ticker("^gspc") == "^GSPC" and dl.clean_ticker("EURUSD=X") == "EURUSD=X"
+    for bad in ["../x", "a/b", "", "TOO_LONG_TICKER_NAME", "x y", "^^X", "SP^Y"]:
         with pytest.raises(ValueError):
             dl.clean_ticker(bad)
 
@@ -88,7 +93,7 @@ def test_page_carries_menu_data(server):
     data = json.loads(body.split("const DATA = ")[1].split(";\n")[0])
     assert data["app"]["strategy"] == "MeanReversion"
     assert data["app"]["settings"] == {"lookback": 20, "entry": 1.5}
-    assert data["app"]["tickers"] == ["TEST"]
+    assert {"symbol": "TEST", "name": None, "group": "Your downloads", "saved": True} in data["app"]["tickers"]
     assert [s["id"] for s in data["app"]["strategies"]][0] == "BuyAndHold"
     plain = get(server + "/?ticker=TEST&strategy=none")[1]
     assert '"strategy":"none","settings":{}' in plain

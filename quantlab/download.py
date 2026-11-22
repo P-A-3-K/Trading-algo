@@ -6,7 +6,9 @@ saved file afterwards instead of asking Yahoo again on every run.
 """
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 from pathlib import Path
 
 import pandas as pd
@@ -25,7 +27,9 @@ def parse_chart(payload: dict) -> pd.DataFrame:
         raise ValueError(f"Yahoo error: {chart['error']}")
     result = chart["result"][0]
     quote = result["indicators"]["quote"][0]
-    dates = [datetime.fromtimestamp(t, timezone.utc).date() for t in result["timestamp"]]
+    # epoch + offset instead of datetime.fromtimestamp(): Windows can't convert
+    # negative (pre-1970) timestamps, and indices like ^GSPC go back to 1927.
+    dates = [(EPOCH + timedelta(seconds=t)).date() for t in result["timestamp"]]
     df = pd.DataFrame({
         "Open": quote["open"], "High": quote["high"], "Low": quote["low"],
         "Close": quote["close"],
@@ -36,9 +40,12 @@ def parse_chart(payload: dict) -> pd.DataFrame:
     return df.dropna(subset=["Close", "Adj Close"]).sort_index()
 
 
+EARLIEST = -2208988800   # 1900-01-01: ask for everything Yahoo has
+
+
 def fetch(ticker: str, timeout: float = 30) -> pd.DataFrame:
     """Download the full daily history for one ticker."""
-    params = {"period1": 0, "period2": int(time.time()), "interval": "1d",
+    params = {"period1": EARLIEST, "period2": int(time.time()), "interval": "1d",
               "events": "div,split", "includeAdjustedClose": "true"}
     resp = requests.get(URL.format(ticker=clean_ticker(ticker)), params=params,
                         headers=HEADERS, timeout=timeout)
@@ -49,7 +56,7 @@ def fetch(ticker: str, timeout: float = 30) -> pd.DataFrame:
     return parse_chart(resp.json())
 
 
-TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,14}$")
+TICKER_RE = re.compile(r"^\^?[A-Z0-9][A-Z0-9.\-=]{0,14}$")
 
 
 def clean_ticker(ticker: str) -> str:
@@ -93,8 +100,9 @@ def download_many(tickers, refresh=False, pause: float = 1.0) -> dict:
     """
     results = {}
     for i, t in enumerate(tickers):
-        was_cached = csv_path(t).exists() and not refresh
+        was_cached = False
         try:
+            was_cached = csv_path(t).exists() and not refresh
             results[t] = download(t, refresh=refresh)
         except Exception as exc:  # report and keep going
             results[t] = f"failed: {exc}"
@@ -130,6 +138,12 @@ def load_bars(ticker: str) -> pd.DataFrame:
 
 if __name__ == "__main__":
     import sys
-    tickers = sys.argv[1:] or ["SPY"]
-    for t, result in download_many(tickers).items():
+    args = sys.argv[1:]
+    refresh = "--refresh" in args
+    if "--popular" in args:
+        from .universe import popular_tickers
+        tickers = popular_tickers()
+    else:
+        tickers = [a for a in args if not a.startswith("--")] or ["SPY"]
+    for t, result in download_many(tickers, refresh=refresh).items():
         print(f"{t:6s} {result}")

@@ -171,6 +171,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
                               full_stats(bench.returns, bench.positions, 1))
         label, adjusted = repr(strategy), True     # strategies run on adjusted bars
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
+            "is_index": ticker.startswith("^"),
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
             "trades": trades_payload(fills), "equity": equity, "stats": stats}
 

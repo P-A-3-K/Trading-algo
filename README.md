@@ -8,6 +8,7 @@ python -m quantlab.app                  # the QuantLab web app: http://127.0.0.1
 python lessons/01_first_backtest.py
 python lessons/02_real_data.py          # downloads SPY & AAPL into data/ on first run
 python -m quantlab.download SPY QQQ     # download any tickers
+python -m quantlab.download --popular   # download the ~50 tickers in quantlab/universe.py
 python lessons/03_data_checks.py        # find gaps in the data
 python -m quantlab.chart SPY            # candlestick chart -> reports/SPY.html
 python lessons/04_strategy_class.py     # write your own strategy plug-in
@@ -17,6 +18,7 @@ pytest -q
 ## Layout
 | File | What it teaches |
 |---|---|
+| `quantlab/universe.py` | Starter list of popular US tickers shown in the app's ticker box |
 | `quantlab/download.py` | Download real prices from Yahoo, cache them in `data/` |
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |
