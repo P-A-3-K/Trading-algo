@@ -89,6 +89,20 @@ def load(ticker: str, adjusted: bool = True) -> pd.Series:
     return df[col].rename(ticker.upper())
 
 
+def load_bars(ticker: str) -> pd.DataFrame:
+    """Daily bars for strategies: open/high/low/close/volume, all adjusted.
+
+    The whole bar is scaled by Adj Close / Close, so every column is on the
+    same dividend- and split-adjusted basis the backtest uses.
+    """
+    df = pd.read_csv(download(ticker), parse_dates=["Date"], index_col="Date")
+    factor = df["Adj Close"] / df["Close"]
+    bars = df[["Open", "High", "Low", "Close"]].mul(factor, axis=0)
+    bars["Volume"] = df["Volume"]
+    bars.columns = [c.lower() for c in bars.columns]
+    return bars
+
+
 if __name__ == "__main__":
     import sys
     tickers = sys.argv[1:] or ["SPY"]

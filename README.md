@@ -9,6 +9,7 @@ python lessons/02_real_data.py          # downloads SPY & AAPL into data/ on fir
 python -m quantlab.download SPY QQQ     # download any tickers
 python lessons/03_data_checks.py        # find gaps in the data
 python -m quantlab.chart SPY            # candlestick chart -> reports/SPY.html
+python lessons/04_strategy_class.py     # write your own strategy plug-in
 pytest -q
 ```
 
@@ -19,7 +20,8 @@ pytest -q
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
 | `quantlab/chart.py` | Interactive candlestick chart page (TradingView Lightweight Charts, bundled in `quantlab/web/vendor`) |
 | `quantlab/data.py` | Prices, returns, random walks (synthetic data = a "no edge" control group) |
-| `quantlab/strategies.py` | A strategy is a function: prices -> position (1 long, 0 flat, -1 short) |
+| `quantlab/strategy.py` | The Strategy plug-in class: name, settings, `compute()` -> positions, `plot()` lines; look-ahead detector |
+| `quantlab/strategies.py` | Built-in strategies: buy & hold, SMA crossover, mean reversion |
 | `quantlab/backtest.py` | Simulation, `shift(1)` against look-ahead bias, transaction costs |
 | `quantlab/metrics.py` | CAGR, volatility, Sharpe, max drawdown |
 

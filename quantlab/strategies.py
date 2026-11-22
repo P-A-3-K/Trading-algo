@@ -1,28 +1,70 @@
-"""Strategies turn prices into a *position*: the fraction of capital held.
+"""Built-in strategies, written as Strategy plug-ins (see quantlab/strategy.py).
 
- 1.0 = fully long, 0.0 = flat (cash), -1.0 = fully short.
-A strategy decides its position using data up to and including day t.
-The backtester is responsible for making sure that position only earns
-returns from day t+1 onward (no peeking into the future).
+The plain functions at the bottom keep lessons 1 and 2 working.
 """
 import pandas as pd
 
+from .strategy import Param, Strategy
+
+
+class BuyAndHold(Strategy):
+    name = "Buy & hold"
+    description = "Always fully invested. The benchmark every strategy must beat."
+    params = {}
+
+    def compute(self, bars):
+        return pd.Series(1.0, index=bars.index)
+
+
+class SmaCrossover(Strategy):
+    name = "SMA crossover"
+    description = ("Trend following: long when the fast moving average is above "
+                   "the slow one, in cash otherwise.")
+    params = {"fast": Param(50, 2, 400, "Fast average (days)"),
+              "slow": Param(200, 5, 500, "Slow average (days)")}
+
+    def validate(self):
+        if self.fast >= self.slow:
+            raise ValueError("fast must be shorter than slow")
+
+    def compute(self, bars):
+        fast = bars.close.rolling(self.fast).mean()
+        slow = bars.close.rolling(self.slow).mean()
+        self.plot(f"SMA {self.fast}", fast)
+        self.plot(f"SMA {self.slow}", slow)
+        return (fast > slow).astype(float)
+
+
+class MeanReversion(Strategy):
+    name = "Mean reversion (z-score)"
+    description = ("Buy when the price is unusually far below its recent average "
+                   "(z-score under -entry), in cash otherwise.")
+    params = {"lookback": Param(20, 5, 250, "Average over (days)"),
+              "entry": Param(1.0, 0.1, 4.0, "Entry z-score", step=0.1)}
+
+    def compute(self, bars):
+        mean = bars.close.rolling(self.lookback).mean()
+        std = bars.close.rolling(self.lookback).std()
+        z = (bars.close - mean) / std
+        self.plot(f"SMA {self.lookback}", mean)
+        self.plot("Z-score", z, pane="lower")
+        return (z < -self.entry).astype(float)
+
+
+BUILTIN = [BuyAndHold, SmaCrossover, MeanReversion]
+
+
+def _bars(prices: pd.Series) -> pd.DataFrame:
+    return pd.DataFrame({"close": prices})
+
 
 def buy_and_hold(prices: pd.Series) -> pd.Series:
-    """The benchmark every strategy must beat."""
-    return pd.Series(1.0, index=prices.index)
+    return BuyAndHold().run(_bars(prices)).positions
 
 
 def sma_crossover(prices: pd.Series, fast=50, slow=200) -> pd.Series:
-    """Trend following: long when the fast average is above the slow one."""
-    fast_ma = prices.rolling(fast).mean()
-    slow_ma = prices.rolling(slow).mean()
-    return (fast_ma > slow_ma).astype(float)
+    return SmaCrossover(fast=fast, slow=slow).run(_bars(prices)).positions
 
 
 def mean_reversion(prices: pd.Series, lookback=20, entry_z=1.0) -> pd.Series:
-    """Buy when price is unusually far below its recent average."""
-    mean = prices.rolling(lookback).mean()
-    std = prices.rolling(lookback).std()
-    z = (prices - mean) / std
-    return (z < -entry_z).astype(float)
+    return MeanReversion(lookback=lookback, entry=entry_z).run(_bars(prices)).positions

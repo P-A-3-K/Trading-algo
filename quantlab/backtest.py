@@ -12,6 +12,8 @@ class BacktestResult:
     returns: pd.Series      # daily strategy returns, after costs
     positions: pd.Series    # position actually held each day
     trades: int             # number of position changes
+    plots: list = None      # lines the strategy asked to draw (if any)
+    strategy: str = ""
 
     def summary(self) -> dict:
         s = metrics.summarize(self.returns)
@@ -40,3 +42,12 @@ def run_backtest(prices: pd.Series, positions: pd.Series,
     equity = (1 + strat_returns).cumprod()
     trades = int((turnover > 0).sum())
     return BacktestResult(equity, strat_returns, held, trades)
+
+
+def backtest(strategy, bars: pd.DataFrame, cost_bps: float = 5.0) -> BacktestResult:
+    """Run a Strategy plug-in on daily bars and simulate it."""
+    out = strategy.run(bars)
+    result = run_backtest(bars["close"], out.positions, cost_bps)
+    result.plots = out.plots
+    result.strategy = repr(strategy)
+    return result
