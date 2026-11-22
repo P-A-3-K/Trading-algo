@@ -1,0 +1,5 @@
+pandas
+numpy
+requests
+pandas_market_calendars
+pytest
