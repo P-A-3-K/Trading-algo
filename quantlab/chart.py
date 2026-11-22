@@ -177,8 +177,8 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
 
 def render_payload(payload: dict, page_title: str = None) -> str:
     """Fill the page template with a payload from build_payload()."""
-    template = (WEB / "candles.html").read_text()
-    library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text()
+    template = (WEB / "candles.html").read_text(encoding="utf-8")
+    library = (WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text(encoding="utf-8")
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
     return (template
             .replace("__TICKER__", page_title or payload["ticker"])
@@ -192,7 +192,7 @@ def save(ticker: str, strategy=None, adjusted: bool = True, out_dir: Path = REPO
     name = payload["ticker"] + (f"_{type(strategy).__name__}" if strategy is not None else "")
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"{name}.html"
-    path.write_text(PAGE.format(body=render_payload(payload)))
+    path.write_text(PAGE.format(body=render_payload(payload)), encoding="utf-8")
     return path
 
 
