@@ -58,8 +58,9 @@ def _check(cls) -> str:
     except Exception as e:
         return f"crashed when tested with its default settings: {type(e).__name__}: {e}"
     if leaks:
-        return ("it looks into the future: its position on a day changes once later prices "
-                "are added (check for shift(-1), centred windows, or using the whole series)")
+        return ("it looks into the future: its position or one of its chart lines for a day "
+                "changes once later prices are added (check for shift(-1), centred windows, "
+                "or using the whole series)")
     return ""
 
 

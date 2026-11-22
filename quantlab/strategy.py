@@ -143,19 +143,30 @@ class Strategy:
         return f"{type(self).__name__}({args})"
 
 
-def check_no_lookahead(strategy: Strategy, bars: pd.DataFrame, checks: int = 8) -> list:
+def check_no_lookahead(strategy: Strategy, bars: pd.DataFrame, checks: int = 20) -> list:
     """Catch strategies that peek at future data.
 
     Re-runs the strategy on the data cut off at several dates. An honest
-    strategy gives the same position on the cut-off day whether or not
-    the future exists. Returns the dates where it changed (empty = honest).
+    strategy gives the same answers for the past whether or not the future
+    exists. Compared on each cut-off day:
+      * the position, and
+      * every line the strategy draws with self.plot(), which catches cheating
+        hidden in an indicator even when the position happens not to change
+        (a value that exists with the future but not without it is a leak).
+    Returns the dates where something changed (empty = honest).
     """
-    full = strategy.run(bars).positions
+    full = strategy.run(bars)
+    full_plots = {p.name: p.values for p in full.plots}
     start = min(len(bars) - 1, max(10, len(bars) // 10))
     cutoffs = np.linspace(start, len(bars) - 2, checks).astype(int)
+    same = lambda a, b: bool(np.isclose(a, b, equal_nan=True))
     leaks = []
     for i in sorted(set(cutoffs)):
-        partial = strategy.run(bars.iloc[: i + 1]).positions
-        if not np.isclose(partial.iloc[-1], full.iloc[i]):
+        part = strategy.run(bars.iloc[: i + 1])
+        leaked = not same(part.positions.iloc[-1], full.positions.iloc[i])
+        for p in part.plots:
+            if p.name in full_plots and not same(p.values.iloc[-1], full_plots[p.name].iloc[i]):
+                leaked = True
+        if leaked:
             leaks.append(bars.index[i])
     return leaks
