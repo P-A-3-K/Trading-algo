@@ -5,7 +5,7 @@
 
 Pages and data it serves:
     /                                   chart page; choose with the address, e.g.
-    /?ticker=QQQ&strategy=SmaCrossover&fast=20&slow=100
+    /?ticker=QQQ&strategy=SmaCrossover&fast=20&slow=100&tf=5m   (tf: 5m 15m 30m 1h 4h 1d)
     /api/strategies                     every strategy with its settings (for the menus)
     /api/tickers                        tickers already downloaded into data/
     /api/backtest?ticker=SPY&strategy=MeanReversion&entry=1.5   the page's data as JSON
@@ -95,6 +95,13 @@ def clean(v):
     return None if math.isnan(v) or math.isinf(v) else v
 
 
+def timeframe_of(query: dict) -> str:
+    return dl.check_timeframe(query.get("tf") or "1d")
+
+
+TIMEFRAME_MENU = [[k, v[1]] for k, v in dl.TIMEFRAMES.items()]
+
+
 def optimize_payload(ticker: str, query: dict) -> dict:
     """Everything the optimizer page needs; runs the sweep when query has run=1."""
     cls = strategies.get(query.get("strategy") or DEFAULT_STRATEGY)
@@ -111,21 +118,29 @@ def optimize_payload(ticker: str, query: dict) -> dict:
     if rank not in RANK_METRICS:
         rank = "sharpe"
     mode = "wf" if query.get("mode") == "wf" else "split"
-    wf = {"train": float(query.get("train", 8)), "test": float(query.get("test", 2)),
+    tf = timeframe_of(query)
+    intraday = tf != "1d"
+    # Walk-forward windows: years on daily bars, trading days on intraday bars
+    wf = {"unit": "days" if intraday else "years",
+          "train": float(query.get("train", 20 if intraday else 8)),
+          "test": float(query.get("test", 5 if intraday else 2)),
           "anchored": query.get("window") == "anchored"}
     app = {"strategy": cls.__name__, "strategies": strategies_info(), "errors": strategy_errors(),
            "tickers": dl.cached_tickers(), "ranges": ranges, "split": split,
            "rank": rank, "mode": mode, "wf": wf,
            "max_combos": optimize.WF_MAX_COMBINATIONS if mode == "wf" else optimize.MAX_COMBINATIONS}
-    payload = {"ticker": ticker, "app": app, "result": None}
+    app["timeframes"], app["timeframe"] = TIMEFRAME_MENU, tf
+    payload = {"ticker": ticker, "timeframe": tf, "intraday": intraday, "app": app, "result": None}
     if query.get("run") and mode == "wf":
-        bars = dl.load_bars(ticker)
+        bars = dl.load_bars(ticker, tf)
+        per_year = 252 if wf["unit"] == "days" else 1        # days -> years
         res = optimize.walk_forward(bars, cls, {k: tuple(v) for k, v in ranges.items()},
-                                    wf["train"], wf["test"], wf["anchored"], rank)
+                                    wf["train"] / per_year, wf["test"] / per_year,
+                                    wf["anchored"], rank)
         payload["result"] = walk_forward_payload(res, rank)
         return payload
     if query.get("run"):
-        bars = dl.load_bars(ticker)
+        bars = dl.load_bars(ticker, tf)
         res = optimize.sweep(bars, cls, {k: tuple(v) for k, v in ranges.items()}, split)
         if res.table.empty:
             raise ValueError("No valid combinations: " + (res.skipped[0][1] if res.skipped else "empty grid"))
@@ -156,14 +171,15 @@ def walk_forward_payload(res, rank: str) -> dict:
     from .metrics import full_stats
     def curve(r):
         eq = chart.START_CAPITAL * (1 + r).cumprod()
-        return [{"time": d.strftime("%Y-%m-%d"), "value": round(float(v), 2)}
+        return [{"time": chart.tkey(d), "value": round(float(v), 2)}
                 for d, v in zip(eq.index, eq.values)]
     def stats(r, held=None):
         st = full_stats(r, held)
         return {"final": chart.START_CAPITAL * (1 + st["total_return"]), "cagr": st["cagr"],
                 "sharpe": st["sharpe"], "max_dd": st["max_drawdown"],
                 "exposure": st.get("time_in_market")}
-    folds = [{**{k: (str(v.date()) if hasattr(v, "date") else v) for k, v in f.items()
+    when = lambda v: v.strftime("%Y-%m-%d %H:%M") if v.tzinfo is not None else str(v.date())
+    folds = [{**{k: (when(v) if hasattr(v, "date") else v) for k, v in f.items()
                  if k != "settings"}, "settings": f["settings"]} for f in res.folds]
     pos_train = [f["train_cagr"] for f in res.folds]
     eff = (sum(f["test_cagr"] for f in res.folds) / sum(pos_train)
@@ -172,8 +188,8 @@ def walk_forward_payload(res, rank: str) -> dict:
         "mode": "wf", "folds": folds, "params": res.params, "rank": rank,
         "count": res.combos, "skipped": len(res.skipped),
         "skip_reason": res.skipped[0][1] if res.skipped else "",
-        "seconds": res.seconds, "start": str(res.returns.index[0].date()),
-        "end": str(res.returns.index[-1].date()),
+        "seconds": res.seconds, "start": when(res.returns.index[0]),
+        "end": when(res.returns.index[-1]),
         "curves": {"wf": curve(res.returns), "bh": curve(res.benchmark), "hind": curve(res.hindsight)},
         "stats": {"wf": stats(res.returns, res.held), "bh": stats(res.benchmark),
                   "hind": stats(res.hindsight)},
@@ -225,13 +241,14 @@ class Handler(BaseHTTPRequestHandler):
     def page(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
         strategy = strategy_from_query(query)
-        payload = chart.build_payload(ticker, strategy)
+        payload = chart.build_payload(ticker, strategy, timeframe=timeframe_of(query))
         # What the control bar needs: menus, and the current choice to pre-select
         payload["app"] = {
             "strategy": type(strategy).__name__ if strategy else "none",
             "settings": dict(strategy.settings) if strategy else {},
             "strategies": strategies_info(),
             "errors": strategy_errors(),
+            "timeframes": TIMEFRAME_MENU,
             "tickers": dl.cached_tickers(),
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
@@ -254,7 +271,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_backtest(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
-        self.send_json(chart.build_payload(ticker, strategy_from_query(query)))
+        self.send_json(chart.build_payload(ticker, strategy_from_query(query),
+                                           timeframe=timeframe_of(query)))
 
     def no_content(self, query):
         self.send_response(HTTPStatus.NO_CONTENT)

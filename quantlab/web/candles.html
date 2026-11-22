@@ -123,6 +123,7 @@ footer a { color: inherit; }
              maxlength="15" required pattern="[A-Za-z0-9][A-Za-z0-9.\-^=]{0,14}"
              title="A ticker symbol, e.g. SPY, AAPL, BRK-B, ^GSPC"></label>
     <datalist id="tickerList"></datalist>
+    <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <span id="settingsIn" class="params"></span>
     <button type="submit" class="run" id="runBtn">Run</button>
@@ -140,11 +141,7 @@ footer a { color: inherit; }
       <span class="strategy" id="strategy" hidden></span>
     </div>
     <div class="controls" role="group" aria-label="Chart range">
-      <button type="button" data-months="1">1M</button>
-      <button type="button" data-months="6">6M</button>
-      <button type="button" data-months="12" aria-pressed="true">1Y</button>
-      <button type="button" data-months="60">5Y</button>
-      <button type="button" data-months="0">All</button>
+      <span id="rangeBtns" style="display:contents"></span>
       <span class="sep" aria-hidden="true"></span>
       <button type="button" id="log" aria-pressed="false" title="Logarithmic price scale: equal % moves look equal">Log</button>
       <button type="button" id="tradesBtn" aria-pressed="true" title="Show or hide buy/sell arrows" hidden>Trades</button>
@@ -190,13 +187,17 @@ const fmt = n => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximum
 const esc = t => String(t).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
 const vol = n => n >= 1e9 ? (n / 1e9).toFixed(2) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(0) + "K" : String(n);
 const bars = DATA.bars;
+// Times are "YYYY-MM-DD" for daily bars, or seconds (New York wall clock) for intraday
+const toDate = t => typeof t === "number" ? new Date(t * 1000) : new Date(t + "T00:00:00Z");
+const fmtTime = t => typeof t === "number" ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : t;
+const sameKind = (d, like) => typeof like === "number" ? Math.floor(d.getTime() / 1000) : d.toISOString().slice(0, 10);
 const last = bars[bars.length - 1], prev = bars[bars.length - 2] || last;
 
 const chart = LW.createChart(document.getElementById("chart"), {
   autoSize: true,
   layout: { fontFamily: css("--mono"), fontSize: 11 },
   rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.08, bottom: 0.24 } },
-  timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02 },
+  timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02, timeVisible: !!DATA.intraday, secondsVisible: false },
   crosshair: { mode: LW.CrosshairMode.Normal },
 });
 const candles = chart.addSeries(LW.CandlestickSeries, { borderVisible: false, priceLineVisible: false,
@@ -280,7 +281,7 @@ const d = last.close / prev.close - 1, chg = document.getElementById("chg");
 chg.textContent = (d >= 0 ? "+" : "") + (d * 100).toFixed(2) + "%";
 chg.className = "chg " + (d >= 0 ? "up" : "down");
 document.getElementById("span").textContent =
-  `${bars[0].time} → ${last.time} · ${bars.length.toLocaleString()} days · ${DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted"}`;
+  `${fmtTime(bars[0].time)} → ${fmtTime(last.time)} · ${bars.length.toLocaleString()} ${DATA.intraday ? DATA.timeframe + " bars, New York time, incl. pre/after-market · prices as traded" : "days · " + (DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted")}`;
 
 // Legend: the bar under the cursor, or the latest bar
 const legend = document.getElementById("legend");
@@ -288,7 +289,7 @@ const byTime = new Map(bars.map((b, i) => [b.time, i]));
 function showBar(b) {
   const i = byTime.get(b.time), p = i > 0 ? bars[i - 1].close : b.open;
   const c = b.close / p - 1, col = c >= 0 ? "var(--up)" : "var(--down)";
-  legend.innerHTML = `<span><b>${b.time}</b></span><span>O <b>${fmt(b.open)}</b></span><span>H <b>${fmt(b.high)}</b></span>` +
+  legend.innerHTML = `<span><b>${fmtTime(b.time)}</b></span><span>O <b>${fmt(b.open)}</b></span><span>H <b>${fmt(b.high)}</b></span>` +
     `<span>L <b>${fmt(b.low)}</b></span><span>C <b>${fmt(b.close)}</b></span>` +
     `<span style="color:${col}">${c >= 0 ? "+" : ""}${(c * 100).toFixed(2)}%</span><span>Vol <b>${vol(b.volume)}</b></span>` +
     plots.map(p => {
@@ -301,7 +302,7 @@ function showBar(b) {
     }).join("");
 }
 showBar(last);
-const keyOf = t => typeof t === "string" ? t
+const keyOf = t => typeof t === "string" || typeof t === "number" ? t
   : `${t.year}-${String(t.month).padStart(2, "0")}-${String(t.day).padStart(2, "0")}`;
 let eqSync = null;   // set below when there are results to show
 chart.subscribeCrosshairMove(p => {
@@ -311,16 +312,23 @@ chart.subscribeCrosshairMove(p => {
 });
 
 // Range buttons and log scale
-const rangeButtons = [...document.querySelectorAll("[data-months]")];
-function setRange(months) {
-  rangeButtons.forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.months === months)));
-  if (!months) { chart.timeScale().fitContent(); return; }
-  const end = new Date(last.time + "T00:00:00Z"), start = new Date(end);
-  start.setUTCMonth(start.getUTCMonth() - months);
-  const from = start.toISOString().slice(0, 10);
-  chart.timeScale().setVisibleRange({ from: from < bars[0].time ? bars[0].time : from, to: last.time });
+// Zoom buttons suit the timeframe: days for intraday, months/years for daily
+const RANGES = DATA.intraday ? [["1D", 1], ["5D", 5], ["1M", 30], ["3M", 91], ["All", 0]]
+                             : [["1M", 30], ["6M", 182], ["1Y", 365], ["5Y", 1826], ["All", 0]];
+document.getElementById("rangeBtns").innerHTML = RANGES.map(([label, days]) =>
+  `<button type="button" data-days="${days}">${label}</button>`).join("");
+const rangeButtons = [...document.querySelectorAll("[data-days]")];
+function setRange(days) {
+  rangeButtons.forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.days === days)));
+  if (!days) { chart.timeScale().fitContent(); return; }
+  const end = toDate(last.time);
+  // "1D" on intraday = the last trading day: start at that day's first bar
+  const start = DATA.intraday && days === 1 ? new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()))
+                                             : new Date(end.getTime() - days * 86400000);
+  const from = sameKind(start, last.time);
+  chart.timeScale().setVisibleRange({ from: toDate(from) < toDate(bars[0].time) ? bars[0].time : from, to: last.time });
 }
-rangeButtons.forEach(b => b.addEventListener("click", () => setRange(+b.dataset.months)));
+rangeButtons.forEach(b => b.addEventListener("click", () => setRange(+b.dataset.days)));
 const logBtn = document.getElementById("log");
 logBtn.addEventListener("click", () => {
   const on = logBtn.getAttribute("aria-pressed") !== "true";
@@ -337,7 +345,7 @@ if (DATA.equity) {
   const eq = LW.createChart(document.getElementById("equity"), {
     autoSize: true, layout: { fontFamily: css("--mono"), fontSize: 11 },
     rightPriceScale: { borderVisible: false, mode: LW.PriceScaleMode.Logarithmic, scaleMargins: { top: 0.12, bottom: 0.06 } },
-    timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02 },
+    timeScale: { borderVisible: false, rightOffset: 4, minBarSpacing: 0.02, timeVisible: !!DATA.intraday, secondsVisible: false },
     crosshair: { mode: LW.CrosshairMode.Normal },
   });
   const bench = eq.addSeries(LW.LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
@@ -379,7 +387,7 @@ if (DATA.equity) {
     const i = idx.has(key) ? idx.get(key) : E.strategy.length - 1;
     const s = E.strategy[i], b = E.benchmark[i];
     const sw = t => `<i class="sw" style="background:${css(t)}"></i>`;
-    rlegend.innerHTML = `<span><b>${s.time}</b></span>` +
+    rlegend.innerHTML = `<span><b>${fmtTime(s.time)}</b></span>` +
       `<span>${sw("--accent")}Strategy <b>${money(s.value)}</b> (${pctf((s.value / E.start - 1) * 100)})</span>` +
       `<span>${sw("--muted")}Buy & hold <b>${money(b.value)}</b> (${pctf((b.value / E.start - 1) * 100)})</span>` +
       `<span style="color:var(--down)">Drawdown <b style="color:inherit">${E.strategy_dd[i].value.toFixed(1)}%</b> vs ${E.benchmark_dd[i].value.toFixed(1)}%</span>`;
@@ -436,6 +444,10 @@ if (DATA.app) {
   const keep = document.getElementById("settingsIn"), run = document.getElementById("runBtn");
   const desc = document.getElementById("stratDesc");
   tIn.value = DATA.ticker;
+  const tfIn = document.getElementById("tfIn");
+  tfIn.innerHTML = A.timeframes.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
+  tfIn.value = DATA.timeframe || "1d";
+  tfIn.addEventListener("change", () => form.requestSubmit());
   document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
   const byId = Object.fromEntries(A.strategies.map(s => [s.id, s]));
   sIn.innerHTML = `<option value="none">None (candles only)</option>` + strategyOptions(A.strategies);
@@ -476,7 +488,7 @@ if (DATA.app) {
   const optLink = document.getElementById("optLink");
   const sweepable = Object.keys(params).length > 0;
   optLink.hidden = !sweepable;
-  if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${encodeURIComponent(A.strategy)}`;
+  if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&tf=${DATA.timeframe || "1d"}&strategy=${encodeURIComponent(A.strategy)}`;
   form.hidden = false;
 }
 
@@ -585,5 +597,5 @@ if (DATA.stats) {
   }).join("");
   document.getElementById("statsWrap").hidden = false;
 }
-setRange(12);
+setRange(DATA.intraday ? 5 : 365);
 </script>

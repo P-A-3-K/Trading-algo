@@ -19,6 +19,21 @@ WEB = Path(__file__).resolve().parent / "web"
 REPORTS = ROOT / "reports"
 
 
+EPOCH = pd.Timestamp("1970-01-01")
+
+
+def tkey(d: pd.Timestamp):
+    """Time value for the chart library.
+
+    Daily bars: "YYYY-MM-DD". Intraday bars (time-zone aware, New York): seconds
+    since 1970 of the New York WALL-CLOCK time, so the chart (which shows UTC)
+    displays exchange time: a 09:30 bar shows as 09:30.
+    """
+    if d.tzinfo is None:
+        return d.strftime("%Y-%m-%d")
+    return int((d.tz_localize(None) - EPOCH).total_seconds())
+
+
 def adjusted_ohlc(df: pd.DataFrame) -> pd.DataFrame:
     """Scale Open/High/Low/Close by Adj Close / Close for each day.
 
@@ -37,7 +52,7 @@ def candles(df: pd.DataFrame, adjusted: bool = True) -> list:
     """Rows in the format the chart library wants: time + OHLC (+ volume)."""
     bars = adjusted_ohlc(df) if adjusted else df
     return [
-        {"time": d.strftime("%Y-%m-%d"), "open": round(o, 4), "high": round(h, 4),
+        {"time": tkey(d), "open": round(o, 4), "high": round(h, 4),
          "low": round(lo, 4), "close": round(c, 4), "volume": int(v)}
         for d, o, h, lo, c, v in zip(bars.index, bars["Open"], bars["High"],
                                      bars["Low"], bars["Close"], bars["Volume"])
@@ -56,8 +71,8 @@ def line_points(values: pd.Series) -> list:
         return []
     first, last = valid.idxmax(), valid[::-1].idxmax()
     span = values.loc[first:last]
-    return [{"time": d.strftime("%Y-%m-%d")} if v != v else
-            {"time": d.strftime("%Y-%m-%d"), "value": round(float(v), 6)}
+    return [{"time": tkey(d)} if v != v else
+            {"time": tkey(d), "value": round(float(v), 6)}
             for d, v in zip(span.index, span.values)]
 
 
@@ -71,7 +86,7 @@ def trades_payload(fills: pd.DataFrame) -> list:
     """Fills (quantlab.backtest.trades) in the format the page draws as arrows."""
     if fills is None:
         return []
-    return [{"time": d.strftime("%Y-%m-%d"), "side": s, "from": float(f), "to": float(t),
+    return [{"time": tkey(d), "side": s, "from": float(f), "to": float(t),
              "price": round(float(p), 4)}
             for d, s, f, t, p in zip(fills["date"], fills["side"], fills["from"],
                                      fills["to"], fills["price"])]
@@ -93,7 +108,7 @@ def equity_payload(strategy_returns: pd.Series, benchmark_returns: pd.Series,
         return eq, dd
     s_eq, s_dd = curve(strategy_returns)
     b_eq, b_dd = curve(benchmark_returns)
-    pts = lambda x, nd: [{"time": d.strftime("%Y-%m-%d"), "value": round(float(v), nd)}
+    pts = lambda x, nd: [{"time": tkey(d), "value": round(float(v), nd)}
                          for d, v in zip(x.index, x.values)]
     return {"start": start,
             "strategy": pts(s_eq, 2), "benchmark": pts(b_eq, 2),
@@ -137,11 +152,17 @@ def stats_payload(strategy: dict, benchmark: dict, start: float = START_CAPITAL)
 
 
 def luck_payload(strategy_returns: pd.Series, benchmark_returns: pd.Series,
-                 samples: int = 5000, block: int = 21) -> dict:
-    """Block bootstrap of strategy vs buy & hold, for the 'Could it be luck?' panel."""
+                 samples: int = 5000, block: int = None) -> dict:
+    """Block bootstrap of strategy vs buy & hold, for the 'Could it be luck?' panel.
+
+    Blocks: about a month of daily bars, or one trading day of intraday bars.
+    """
     from .bootstrap import bootstrap, histogram
+    from .metrics import bars_per_day, periods_per_year
+    bpd = bars_per_day(strategy_returns.index)
+    block = block or (21 if bpd <= 1 else int(round(bpd)))
     st, be, beat = bootstrap(strategy_returns.to_numpy(), benchmark_returns.to_numpy(),
-                             samples, block)
+                             samples, block, ppy=periods_per_year(strategy_returns))
     f = lambda d: {k: float(v) for k, v in d.items()}
     return {"samples": samples, "block": block, "strategy": f(st.summary()),
             "benchmark": f(be.summary()), "beats": beat, "hist": histogram(st, be)}
@@ -171,28 +192,47 @@ PAGE = """<!doctype html>
 """
 
 
-def build_payload(ticker: str, strategy=None, adjusted: bool = True) -> dict:
-    """Everything the chart page shows, for one ticker and optional strategy.
+def build_payload(ticker: str, strategy=None, adjusted: bool = True,
+                  timeframe: str = "1d") -> dict:
+    """Everything the chart page shows, for one ticker, timeframe and optional strategy.
 
     Used both for saved report files and by the web app (quantlab.app).
     """
+    from .metrics import bars_per_day
     ticker = dl.clean_ticker(ticker)
-    df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
+    dl.check_timeframe(timeframe)
+    intraday = timeframe != "1d"
+    if intraday:
+        bars = dl.load_bars(ticker, timeframe)
+        df = bars.rename(columns=str.capitalize)
+        df["Adj Close"] = df["Close"]          # intraday prices are as traded
+        adjusted = False
+    else:
+        df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
+    bpd = bars_per_day(df.index)
     plots, fills, equity, stats, luck, label = [], None, None, None, None, ""
     if strategy is not None:
         from .backtest import fills_of, run_backtest, simulate
         from .metrics import full_stats
-        bars = dl.load_bars(ticker)
+        if not intraday:
+            bars = dl.load_bars(ticker)
         out = strategy.run(bars)
         plots, fills = out.plots, fills_of(bars, out)
         strat = simulate(bars, out)
         bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
         equity = equity_payload(strat.returns, bench.returns)
-        stats = stats_payload(full_stats(strat.returns, strat.positions, len(fills)),
-                              full_stats(bench.returns, bench.positions, 1))
+        s_st = full_stats(strat.returns, strat.positions, len(fills))
+        b_st = full_stats(bench.returns, bench.positions, 1)
+        for st in (s_st, b_st):                    # bar counts -> trading days
+            for k in ("longest_drawdown_days", "avg_days_held"):
+                if st.get(k) is not None:
+                    st[k] = st[k] / bpd
+        stats = stats_payload(s_st, b_st)
         luck = luck_payload(strat.returns, bench.returns)
-        label, adjusted = repr(strategy), True     # strategies run on adjusted bars
+        label = repr(strategy)
+        adjusted = adjusted if intraday else True  # daily strategies run on adjusted bars
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
+            "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
             "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck}
 

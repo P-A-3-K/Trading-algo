@@ -123,6 +123,7 @@ footer { color: var(--muted); font-size: 12px; }
       <input id="tickerIn" name="ticker" list="tickerList" autocomplete="off" spellcheck="false" maxlength="15" required
              pattern="[A-Za-z0-9][A-Za-z0-9.\-^=]{0,14}"></label>
     <datalist id="tickerList"></datalist>
+    <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <a class="navlink" id="chartLink" href="/">← Chart</a>
     <input type="hidden" name="run" value="1">
@@ -143,9 +144,9 @@ footer { color: var(--muted); font-size: 12px; }
           <option value="split">One split: in / out-of-sample</option>
           <option value="wf">Walk-forward: re-optimize as you go</option></select></label>
       <span class="wfFields" id="wfFields">
-        <label class="field"><span>Train on (years)</span>
+        <label class="field"><span id="trainLbl">Train on (years)</span>
           <input type="number" name="train" form="form" id="trainIn" min="1" max="30" step="any" required></label>
-        <label class="field"><span>Then trade (years)</span>
+        <label class="field"><span id="testLbl">Then trade (years)</span>
           <input type="number" name="test" form="form" id="testIn" min="0.25" max="10" step="any" required></label>
         <label class="field"><span>Training window</span>
           <select name="window" form="form" id="windowIn">
@@ -233,16 +234,22 @@ function strategyNotice(app) {
 // ---- Controls --------------------------------------------------------------------
 const tIn = document.getElementById("tickerIn"), sIn = document.getElementById("stratIn");
 tIn.value = DATA.ticker;
+const TF = DATA.timeframe || "1d";
+const tfIn = document.getElementById("tfIn");
+tfIn.innerHTML = A.timeframes.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
+tfIn.value = TF;
+tfIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${tfIn.value}&strategy=${sIn.value}`; });
+const fmtTime = t => typeof t === "number" ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : t;
 document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
 const sweepable = A.strategies.filter(s => Object.keys(s.params).length);
 sIn.innerHTML = strategyOptions(sweepable);
 strategyNotice(A);
 sIn.value = S.id;
-sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&strategy=${sIn.value}`; });
+sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}`; });
 tIn.addEventListener("input", () => { tIn.value = tIn.value.toUpperCase(); });
 document.getElementById("stratName").textContent = S.name;
 document.getElementById("splitIn").value = String(A.split);
-document.getElementById("chartLink").href = `/?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${S.id}`;
+document.getElementById("chartLink").href = `/?ticker=${encodeURIComponent(DATA.ticker)}&tf=${TF}&strategy=${S.id}`;
 
 const METRICS = {
   sharpe: { label: "Sharpe ratio", fmt: v => v.toFixed(2), better: "higher" },
@@ -273,6 +280,10 @@ const countEl = document.getElementById("count");
 const modeIn = document.getElementById("modeIn");
 modeIn.value = A.mode;
 document.getElementById("trainIn").value = A.wf.train;
+const unit = A.wf.unit === "days" ? "trading days" : "years";
+document.getElementById("trainLbl").textContent = `Train on (${unit})`;
+document.getElementById("testLbl").textContent = `Then trade (${unit})`;
+if (A.wf.unit === "days") { document.getElementById("trainIn").max = 2000; document.getElementById("testIn").max = 500; document.getElementById("testIn").min = 1; }
 document.getElementById("testIn").value = A.wf.test;
 document.getElementById("windowIn").value = A.wf.anchored ? "anchored" : "rolling";
 function showMode() {
@@ -352,7 +363,7 @@ function drawWalkForward(W) {
   const el = document.getElementById("wfChart");
   const chart = LW.createChart(el, { autoSize: true, layout: { fontFamily: css("--mono"), fontSize: 11 },
     rightPriceScale: { borderVisible: false, mode: LW.PriceScaleMode.Logarithmic },
-    timeScale: { borderVisible: false, minBarSpacing: 0.02 }, crosshair: { mode: LW.CrosshairMode.Normal } });
+    timeScale: { borderVisible: false, minBarSpacing: 0.02, timeVisible: !!DATA.intraday, secondsVisible: false }, crosshair: { mode: LW.CrosshairMode.Normal } });
   const money0 = v => "$" + (v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e4 ? (v / 1e3).toFixed(1) + "K" : Math.round(v).toLocaleString());
   const mk = (opts) => chart.addSeries(LW.LineSeries, { lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
     priceFormat: { type: "custom", formatter: money0 }, ...opts });
@@ -374,7 +385,7 @@ function drawWalkForward(W) {
   const at = new Map(W.curves.wf.map((p, i) => [p.time, i]));
   const show = i => {
     const sw = t => `<i class="sw" style="background:${css(t)}"></i>`;
-    lg.innerHTML = `<span><b>${W.curves.wf[i].time}</b></span>` +
+    lg.innerHTML = `<span><b>${fmtTime(W.curves.wf[i].time)}</b></span>` +
       `<span>${sw("--accent")}Walk-forward <b>${money0(W.curves.wf[i].value)}</b></span>` +
       `<span>${sw("--muted")}Buy & hold <b>${money0(W.curves.bh[i].value)}</b></span>` +
       `<span>${sw("--warn")}Hindsight <b>${money0(W.curves.hind[i].value)}</b></span>`;
@@ -389,7 +400,7 @@ function drawWalkForward(W) {
   document.getElementById("wfFolds").innerHTML = `<thead><tr><th>#</th><th>Trained on</th><th>Then traded</th><th style="text-align:left">Settings chosen</th>` +
     `<th>Train ${esc(rk.label.toLowerCase())}</th><th>Train return / yr</th><th>Trade return</th><th>Trade return / yr</th><th>Trade Sharpe</th></tr></thead><tbody>` +
     W.folds.map((f, i) => {
-      const url = `/?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${S.id}&` + params.map(([k]) => `${k}=${f.settings[k]}`).join("&");
+      const url = `/?ticker=${encodeURIComponent(DATA.ticker)}&tf=${TF}&strategy=${S.id}&` + params.map(([k]) => `${k}=${f.settings[k]}`).join("&");
       const trainScore = W.rank === "trades" ? Math.round(-f.train_score) : rk.fmt(f.train_score);
       return `<tr><td><a href="${url}" title="Open these settings on the chart">${i + 1}</a></td><td>${f.train_start} → ${f.train_end}</td><td>${f.test_start} → ${f.test_end}</td>` +
         `<td class="settings">${esc(settingText(f.settings))}</td><td>${trainScore}</td><td class="${f.train_cagr >= 0 ? "pos" : "neg"}">${pct(f.train_cagr)}</td>` +
@@ -405,7 +416,7 @@ if (RES && RES.mode !== "wf") {
   const rows = RES.rows, bench = RES.benchmark, varied = RES.params;
   const rk = A.rank, M = METRICS[rk];
   const sign = M.better === "higher" ? -1 : 1;              // sort direction for "best first"
-  const chartUrl = r => `/?ticker=${encodeURIComponent(DATA.ticker)}&strategy=${S.id}&` +
+  const chartUrl = r => `/?ticker=${encodeURIComponent(DATA.ticker)}&tf=${TF}&strategy=${S.id}&` +
     params.map(([k]) => `${k}=${r[k]}`).join("&");
 
   // Verdict: did the in-sample winners hold up?

@@ -244,6 +244,29 @@ def resample_bars(df: pd.DataFrame, rule: str) -> pd.DataFrame:
     return agg
 
 
+def clean_spikes(df: pd.DataFrame, min_move: float = 0.02, factor: float = 10.0,
+                 lookback: int = 50) -> pd.DataFrame:
+    """Trim wicks that are bad prints (common in thin pre-market/after-hours data).
+
+    A wick is a bad print when it sticks out beyond the bar's body (open/close) by
+    more than `min_move` (2%) AND more than `factor` x the typical bar range of the
+    previous `lookback` bars. It is trimmed back to the body; open and close stay.
+    Only EARLIER bars are used to judge, so cleaning never peeks at the future.
+    Returns a copy with an attribute .attrs["spikes_trimmed"].
+    """
+    df = df.copy()
+    body_lo = df[["Open", "Close"]].min(axis=1)
+    body_hi = df[["Open", "Close"]].max(axis=1)
+    typical = ((df["High"] - df["Low"]) / df["Close"]).rolling(lookback, min_periods=10).median().shift(1)
+    limit = (typical * factor).clip(lower=min_move).fillna(min_move * 2)
+    bad_lo = (body_lo - df["Low"]) / df["Close"] > limit
+    bad_hi = (df["High"] - body_hi) / df["Close"] > limit
+    df.loc[bad_lo, "Low"] = body_lo[bad_lo]
+    df.loc[bad_hi, "High"] = body_hi[bad_hi]
+    df.attrs["spikes_trimmed"] = int(bad_lo.sum() + bad_hi.sum())
+    return df
+
+
 def load_intraday(ticker: str, timeframe: str) -> pd.DataFrame:
     """Intraday bars (pre-market and after-hours included), New York time.
 
@@ -254,11 +277,14 @@ def load_intraday(ticker: str, timeframe: str) -> pd.DataFrame:
     source = TIMEFRAMES[timeframe][0]
     if source.startswith("from:"):
         _, base, rule = source.split(":")
-        df = resample_bars(read_intraday(download_intraday(ticker, base)), rule)
+        raw = clean_spikes(read_intraday(download_intraday(ticker, base)))
+        df = resample_bars(raw, rule)
+        df.attrs["spikes_trimmed"] = raw.attrs["spikes_trimmed"]
     else:
-        df = read_intraday(download_intraday(ticker, timeframe))
+        df = clean_spikes(read_intraday(download_intraday(ticker, timeframe)))
     bars = df[["Open", "High", "Low", "Close", "Volume"]].copy()
     bars.columns = [c.lower() for c in bars.columns]
+    bars.attrs["spikes_trimmed"] = df.attrs.get("spikes_trimmed", 0)
     return bars
 
 
