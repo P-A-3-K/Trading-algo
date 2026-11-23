@@ -58,6 +58,7 @@ python lessons/03_data_checks.py        # find gaps in the data
 python -m quantlab.chart SPY            # candlestick chart -> reports/SPY.html
 python lessons/04_strategy_class.py     # write your own strategy plug-in
 python -m quantlab.check strategies/my_idea.py   # test a strategy file (see strategies/README.md)
+python -m quantlab.compare GLD 1h "MtfRsi htf=4h" RsiReversion   # A/B: strategies side by side
 pytest -q
 ```
 
