@@ -10,6 +10,10 @@ Pages and data it serves:
     /api/strategies                     every strategy with its settings (for the menus)
     /api/tickers                        tickers already downloaded into data/
     /api/backtest?ticker=SPY&strategy=MeanReversion&entry=1.5   the page's data as JSON
+    /optimize?ticker=SPY&strategy=SmaCrossover   parameter sweep: one split, walk-forward,
+                                        or mode=scan&tickers=SPY,QQQ&tfs=1d,1h (many markets)
+    /api/scan/start, /api/scan/status?id=, /api/scan/cancel?id=   a market scan runs in the
+                                        background; the page polls for progress
 
 It only listens on 127.0.0.1 (your own computer), so nobody else on your
 network can reach it. Built on Python's standard library: nothing to install.
@@ -136,22 +140,40 @@ def timeframe_of(query: dict) -> str:
 TIMEFRAME_MENU = [[k, v[1]] for k, v in dl.TIMEFRAMES.items()]
 
 
-def optimize_payload(ticker: str, query: dict) -> dict:
-    """Everything the optimizer page needs; runs the sweep when query has run=1."""
+def sweep_request(query: dict):
+    """(strategy class, ranges, in-sample share, rank metric) from the optimizer's address."""
     cls = strategies.get(query.get("strategy") or DEFAULT_STRATEGY)
     if not cls.params:
         raise ValueError(f"{cls.name} has no settings to sweep. Pick another strategy.")
     ranges = default_ranges(cls)
     for k, p in cls.all_params().items():
         if f"{k}_from" in query:
-            ranges[k] = [float(query[f"{k}_from"]), float(query[f"{k}_to"]), float(query[f"{k}_step"])]
+            try:
+                ranges[k] = [float(query[f"{k}_from"]), float(query[f"{k}_to"]), float(query[f"{k}_step"])]
+            except (KeyError, ValueError):
+                raise ValueError(f"setting {k}: from / to / step must be numbers")
             if p.is_int or p.is_bool:
                 ranges[k] = [int(round(x)) for x in ranges[k]]
     split = float(query.get("split", 0.7))
     rank = query.get("rank", "sharpe")
     if rank not in RANK_METRICS:
         rank = "sharpe"
-    mode = "wf" if query.get("mode") == "wf" else "split"
+    return cls, ranges, split, rank
+
+
+def scan_markets_of(query: dict, ticker: str, tf: str):
+    """(tickers, timeframes) for a market scan: tickers=SPY,QQQ&tfs=1d,1h."""
+    tickers = [dl.clean_ticker(t) for t in (query.get("tickers") or ticker).split(",") if t.strip()]
+    tfs = [dl.check_timeframe(t) for t in (query.get("tfs") or tf).split(",") if t.strip()]
+    return list(dict.fromkeys(tickers)), list(dict.fromkeys(tfs))
+
+
+def optimize_payload(ticker: str, query: dict) -> dict:
+    """Everything the optimizer page needs; runs the sweep when query has run=1.
+    (A market scan runs in the background instead: see ScanJobs.)"""
+    from . import scan
+    cls, ranges, split, rank = sweep_request(query)
+    mode = query.get("mode") if query.get("mode") in ("wf", "scan") else "split"
     tf = timeframe_of(query)
     intraday = tf != "1d"
     # Walk-forward windows: years on daily bars, trading days on intraday bars
@@ -166,7 +188,14 @@ def optimize_payload(ticker: str, query: dict) -> dict:
            "rank": rank, "mode": mode, "wf": wf,
            "max_combos": optimize.WF_MAX_COMBINATIONS if mode == "wf" else optimize.MAX_COMBINATIONS}
     app["timeframes"], app["timeframe"] = TIMEFRAME_MENU, tf
+    s_tickers, s_tfs = scan_markets_of(query, ticker, tf)
+    app["scan"] = {"tickers": s_tickers, "tfs": s_tfs, "max_markets": scan.MAX_MARKETS,
+                   "max_backtests": scan.MAX_BACKTESTS, "thin_days": scan.THIN_TEST_DAYS}
+    if mode == "scan":
+        app["max_combos"] = optimize.MAX_COMBINATIONS
     payload = {"ticker": ticker, "timeframe": tf, "intraday": intraday, "app": app, "result": None}
+    if mode == "scan":                      # runs from the page via /api/scan/start
+        return payload
     if query.get("run") and mode == "wf":
         bars = dl.load_bars(ticker, tf)
         per_year = 252 if wf["unit"] == "days" else 1        # days -> years
@@ -252,6 +281,74 @@ def strategy_errors() -> list:
     return [{"file": f, "error": e} for f, e in strategies.catalog()[1].errors]
 
 
+class ScanJobs:
+    """Market scans run in a background thread; the page polls for progress.
+
+    Only a few are kept (they're per-browser-tab and small), oldest dropped first.
+    """
+    KEEP = 4
+
+    def __init__(self):
+        self.jobs, self.lock, self.next_id = {}, threading.Lock(), 1
+
+    def start(self, query: dict) -> str:
+        from . import scan
+        ticker = dl.clean_ticker(query.get("ticker") or DEFAULT_TICKER)
+        cls, ranges, split, rank = sweep_request(query)
+        tickers, tfs = scan_markets_of(query, ticker, timeframe_of(query))
+        markets = [(t, tf) for t in tickers for tf in tfs]
+        _, cost_model = costs_of(query)
+        # Check sizes now, so a too-big scan fails at once instead of in the background
+        n = len(optimize.grid(cls, {k: tuple(v) for k, v in ranges.items()}))
+        if len(markets) > scan.MAX_MARKETS:
+            raise ValueError(f"{len(markets)} markets is too many (max {scan.MAX_MARKETS}).")
+        if n * len(markets) > scan.MAX_BACKTESTS:
+            raise ValueError(f"{len(markets)} markets x {n:,} combinations = {n * len(markets):,} backtests "
+                             f"(max {scan.MAX_BACKTESTS:,}). Use bigger steps or fewer markets.")
+        with self.lock:
+            job_id = str(self.next_id); self.next_id += 1
+            job = {"id": job_id, "state": "running", "done": 0, "total": n * len(markets),
+                   "label": "Starting", "result": None, "error": None, "cancel": False,
+                   "started": time.time()}
+            self.jobs[job_id] = job
+            for old in list(self.jobs)[:-self.KEEP]:
+                if self.jobs[old]["state"] != "running":
+                    del self.jobs[old]
+
+        def progress(done, total, label):
+            if job["cancel"]:
+                raise scan.Cancelled()
+            job.update(done=done, total=total, label=label)
+
+        def work():
+            try:
+                job["result"] = scan.scan(cls, {k: tuple(v) for k, v in ranges.items()}, markets,
+                                          split, rank, costs=cost_model, progress=progress)
+                job["state"] = "done"
+            except scan.Cancelled:
+                job["state"] = "cancelled"
+            except Exception as e:
+                traceback.print_exc()
+                job["state"], job["error"] = "error", f"{type(e).__name__}: {e}"
+        threading.Thread(target=work, daemon=True).start()
+        return job_id
+
+    def status(self, job_id: str) -> dict:
+        job = self.jobs.get(job_id)
+        if job is None:
+            raise ValueError("That scan is no longer available. Run it again.")
+        out = {k: v for k, v in job.items() if k != "cancel"}
+        out["elapsed"] = time.time() - job["started"]
+        return out
+
+    def cancel(self, job_id: str):
+        if job_id in self.jobs:
+            self.jobs[job_id]["cancel"] = True
+
+
+SCANS = ScanJobs()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "QuantLab/1.0"
 
@@ -262,6 +359,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/strategies": self.api_strategies,
                   "/api/tickers": self.api_tickers, "/api/backtest": self.api_backtest,
                   "/api/search": self.api_search,
+                  "/api/scan/start": self.api_scan_start, "/api/scan/status": self.api_scan_status,
+                  "/api/scan/cancel": self.api_scan_cancel,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
         if handler is None:
@@ -323,6 +422,16 @@ class Handler(BaseHTTPRequestHandler):
         seen = {r["symbol"] for r in local}
         self.send_json({"query": q, "local": local,
                         "remote": [r for r in remote if r["symbol"] not in seen], "error": error})
+
+    def api_scan_start(self, query):
+        self.send_json({"id": SCANS.start(query)})
+
+    def api_scan_status(self, query):
+        self.send_json(SCANS.status(query.get("id", "")))
+
+    def api_scan_cancel(self, query):
+        SCANS.cancel(query.get("id", ""))
+        self.send_json({"ok": True})
 
     def api_backtest(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER

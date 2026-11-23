@@ -24,6 +24,12 @@ Any strategy can be set to **day trade** (flat outside 9:30-16:00) on intraday t
 **Costs:** pick Realistic (default), Flat 0.05%, No costs, Expensive or Custom; the stats table
 shows return before costs and the $ paid, so you see how much trading costs eat.
 
+**Which ticker and timeframe suit a strategy?** On the Optimize page pick the method
+**Many markets: tickers × timeframes**, add tickers (or a whole group) and tick timeframes. The
+same sweep runs on every combination. Each market's settings are picked on its in-sample part
+and judged on the rest, so the ticker × timeframe heatmap compares honest, out-of-sample numbers.
+The "settings across all markets" table shows which settings hold up almost everywhere.
+
 Needs Python 3.10+ ([python.org](https://www.python.org/downloads/), tick
 "Add python.exe to PATH" on Windows) and, for updates, Git.
 
@@ -32,7 +38,8 @@ Needs Python 3.10+ ([python.org](https://www.python.org/downloads/), tick
 ```bash
 pip install pandas numpy requests pandas_market_calendars pytest
 python -m quantlab.app                  # the QuantLab web app: http://127.0.0.1:8000
-                                        #   /optimize = parameter sweep: one split, or walk-forward
+                                        #   /optimize = parameter sweep: one split, walk-forward,
+                                        #   or many markets (tickers x timeframes)
 python lessons/01_first_backtest.py
 python lessons/02_real_data.py          # downloads SPY & AAPL into data/ on first run
 python -m quantlab.download SPY QQQ     # download any tickers
@@ -49,6 +56,7 @@ pytest -q
 | `quantlab/download.py` | Download real prices from Yahoo, cache them in `data/` |
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
 | `quantlab/optimize.py` | Parameter sweep: every combination of settings, scored in-sample and out-of-sample; overfitting report; walk-forward (re-optimize each window, trade the next) |
+| `quantlab/scan.py` | Market scan: the same sweep on many tickers × timeframes; settings picked in-sample per market, compared out-of-sample; settings ranked across all markets |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |

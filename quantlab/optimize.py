@@ -61,20 +61,42 @@ def grid(cls, ranges: dict) -> list:
     return combos
 
 
-def segment_stats(returns: pd.Series, held: pd.Series, prefix: str) -> dict:
-    """Headline numbers for one stretch of the backtest."""
+def segment_stats(returns: pd.Series, held: pd.Series, prefix: str, ppy: float = None) -> dict:
+    """Headline numbers for one stretch of the backtest.
+
+    Same numbers as metrics.cagr / sharpe / max_drawdown / round_trips, worked out
+    with plain numpy arrays: a sweep calls this thousands of times.
+    """
     if len(returns) < 2:
         return {}
-    trips = round_trips(returns, held)
-    changes = held.diff().fillna(held.iloc[0]).ne(0).sum()
+    from .metrics import periods_per_year
+    ppy = ppy or periods_per_year(returns)
+    r = np.nan_to_num(returns.to_numpy(dtype=float))
+    h = np.nan_to_num(held.to_numpy(dtype=float))
+    n = len(r)
+    growth = np.cumprod(1 + r)
+    total = growth[-1]
+    sd = r.std(ddof=1)
+    # Round trips: each stretch of bars with a position, plus the exit bar after it (its cost)
+    in_trade = h != 0
+    edges = np.diff(np.concatenate(([0], in_trade.astype(np.int8), [0])))
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1) - 1
+    if len(starts):
+        logs = np.concatenate(([0.0], np.cumsum(np.log1p(np.maximum(r, -0.999999)))))
+        last = np.minimum(ends + 1, n - 1)                  # include the exit bar if there is one
+        trip = np.expm1(logs[last + 1] - logs[starts])
+        win_rate = float((trip > 0).mean())
+    else:
+        win_rate = np.nan
+    changes = np.count_nonzero(np.diff(h)) + (h[0] != 0)
     return {
-        f"{prefix}_final": START * float((1 + returns).prod()),
-        f"{prefix}_cagr": cagr(returns),
-        f"{prefix}_sharpe": sharpe(returns),
-        f"{prefix}_max_dd": max_drawdown(returns),
+        f"{prefix}_final": START * float(total),
+        f"{prefix}_cagr": float(total ** (ppy / n) - 1),
+        f"{prefix}_sharpe": float(r.mean() / sd * np.sqrt(ppy)) if sd > 0 else 0.0,
+        f"{prefix}_max_dd": float((growth / np.maximum.accumulate(growth) - 1).min()),
         f"{prefix}_trades": int(changes),
-        f"{prefix}_win_rate": float((trips["return"] > 0).mean()) if len(trips) else np.nan,
-        f"{prefix}_exposure": float((held != 0).mean()),
+        f"{prefix}_win_rate": win_rate,
+        f"{prefix}_exposure": float(in_trade.mean()),
     }
 
 
@@ -91,8 +113,10 @@ class SweepResult:
 
 
 def sweep(bars: pd.DataFrame, cls, ranges: dict, split: float = 0.7,
-          cost_bps: float = 5.0, costs=None) -> SweepResult:
-    """Backtest every combination in `ranges` and score it in-sample and out-of-sample."""
+          cost_bps: float = 5.0, costs=None, progress=None) -> SweepResult:
+    """Backtest every combination in `ranges` and score it in-sample and out-of-sample.
+
+    progress: optional function(done, total), called before each combination."""
     if not 0.3 <= split <= 0.95:
         raise ValueError("in-sample share must be between 30% and 95%")
     t0 = time.time()
@@ -100,7 +124,12 @@ def sweep(bars: pd.DataFrame, cls, ranges: dict, split: float = 0.7,
     split_date = bars.index[cut]
     rows, skipped = [], []
     prepared = costs.prepare(bars) if costs is not None else None   # once, not per combination
-    for settings in grid(cls, ranges):
+    from .metrics import periods_per_year
+    ppy_is, ppy_oos = periods_per_year(bars.index[:cut].to_series()), periods_per_year(bars.index[cut:].to_series())
+    combos = grid(cls, ranges)
+    for i, settings in enumerate(combos):
+        if progress is not None:
+            progress(i, len(combos))            # may raise to cancel
         try:
             strategy = cls(**settings)
         except ValueError as e:                 # e.g. fast >= slow
@@ -108,9 +137,9 @@ def sweep(bars: pd.DataFrame, cls, ranges: dict, split: float = 0.7,
             continue
         bt = simulate(bars, strategy.run(bars), cost_bps, prepared)
         row = dict(settings)
-        row.update(segment_stats(bt.returns.iloc[:cut], bt.positions.iloc[:cut], "is"))
+        row.update(segment_stats(bt.returns.iloc[:cut], bt.positions.iloc[:cut], "is", ppy_is))
         # OOS starts flat-or-holding exactly as the strategy was: no fresh entry cost
-        row.update(segment_stats(bt.returns.iloc[cut:], bt.positions.iloc[cut:], "oos"))
+        row.update(segment_stats(bt.returns.iloc[cut:], bt.positions.iloc[cut:], "oos", ppy_oos))
         rows.append(row)
     table = pd.DataFrame(rows)
     bh = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), cost_bps, prepared)

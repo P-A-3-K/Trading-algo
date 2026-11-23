@@ -155,6 +155,43 @@ span.tip-i:hover::after, span.tip-i:focus::after { content: attr(data-tip); posi
 .notice-box ul { margin: 6px 0 0; padding-left: 18px; }
 .notice-box code { font-family: var(--mono); }
 footer { color: var(--muted); font-size: 12px; }
+
+/* Market scan: markets picker, progress, ticker x timeframe heatmap */
+.markets { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); max-width: 900px; }
+.markets h3 { margin: 0 0 8px; font: 600 14px/1.3 var(--sans); }
+.markets h3 small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
+.mk-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+#addTicker { width: 11em; text-transform: uppercase; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-height: 32px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; font: 500 13px/1 var(--mono); background: var(--grid);
+  border: 1px solid var(--line); border-radius: 14px; padding: 4px 4px 4px 10px; }
+.chip button { all: unset; cursor: pointer; width: 18px; height: 18px; border-radius: 50%; text-align: center;
+  font: 500 14px/18px var(--sans); color: var(--muted); }
+.chip button:hover, .chip button:focus-visible { color: var(--panel); background: var(--down); }
+.chips .empty { color: var(--muted); font-size: 13px; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.quick button { padding: 6px 10px; font-size: 12px; }
+.tfs { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin: 12px 0 0; padding: 0; border: 0; }
+.tfs legend { float: left; margin-right: 12px; font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tfs label { display: inline-flex; gap: 6px; align-items: center; font: 500 13px var(--mono); cursor: pointer; }
+.tfs input { margin: 0; accent-color: var(--accent); }
+.progress { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.progress .bar { flex: 1 1 260px; height: 8px; border-radius: 4px; background: var(--grid); overflow: hidden; }
+.progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+.progress .what { font: 13px var(--mono); color: var(--muted); }
+.scanmap .plot { overflow-x: auto; margin-top: 10px; }
+.scanmap svg { display: block; height: auto; max-width: 100%; }
+.scanmap svg text { font: 11px var(--mono); fill: var(--muted); }
+.scanmap svg text.val { font: 500 12px var(--mono); pointer-events: none; }
+.scanmap rect.cell { cursor: pointer; }
+.scanmap rect.cell:hover, .scanmap rect.cell:focus { stroke: var(--fg); stroke-width: 2; outline: none; }
+.tfsum { margin-top: 12px; max-width: 820px; }
+.tfsum td:first-child, .tfsum th:first-child { text-align: left; }
+#scanTable td.l, #scanTable th.l, #setTable td.l { text-align: left; font-family: var(--sans); }
+#scanTable tr.thin td { opacity: .6; }
+#scanTable tr.err td { color: var(--muted); }
+.badge { display: inline-block; font: 500 10px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; padding: 3px 5px;
+  border-radius: 4px; border: 1px solid var(--warn); color: var(--warn); margin-left: 6px; vertical-align: 1px; }
 </style>
 
 <div class="wrap">
@@ -176,15 +213,29 @@ footer { color: var(--muted); font-size: 12px; }
     <h1 id="setupTitle">Parameter sweep <small id="stratName"></small></h1>
     <p class="desc" id="descSplit">Backtest every combination of the settings below. The first part of history picks the winners
       (<b>in-sample</b>); the rest checks them on data they never saw (<b>out-of-sample</b>).</p>
+    <p class="desc" id="descScan" hidden><b>Many markets:</b> run the same sweep on every ticker and timeframe below.
+      On each market the settings are picked on the in-sample part only, then judged on the out-of-sample part, so
+      the comparison between markets uses numbers the optimizer never saw.</p>
     <p class="desc" id="descWf" hidden><b>Walk-forward:</b> pick the best settings on the first training years, trade them on the
       next stretch, then move forward and repeat. The joined trading stretches are all out-of-sample: the most honest estimate
       of what optimizing this strategy would really have earned.</p>
     <div class="ranges" id="ranges"></div>
+    <div class="markets" id="marketsBox" hidden>
+      <h3>Markets <small id="mkCount"></small></h3>
+      <div class="mk-row">
+        <label class="field"><span>Add ticker</span>
+          <input id="addTicker" autocomplete="off" spellcheck="false" maxlength="16"></label>
+        <div class="chips" id="chips" aria-live="polite"></div>
+      </div>
+      <div class="quick" id="quick"></div>
+      <fieldset class="tfs" id="tfsBox"><legend>Timeframes</legend></fieldset>
+    </div>
     <div class="row2">
       <label class="field"><span>Method</span>
         <select name="mode" form="form" id="modeIn">
           <option value="split">One split: in / out-of-sample</option>
-          <option value="wf">Walk-forward: re-optimize as you go</option></select></label>
+          <option value="wf">Walk-forward: re-optimize as you go</option>
+          <option value="scan">Many markets: tickers × timeframes</option></select></label>
       <span class="wfFields" id="wfFields">
         <label class="field"><span id="trainLbl">Train on (years)</span>
           <input type="number" name="train" form="form" id="trainIn" min="1" max="30" step="any" required></label>
@@ -206,6 +257,33 @@ footer { color: var(--muted); font-size: 12px; }
       <button type="submit" class="run" form="form" id="runBtn">Run sweep</button>
     </div>
   </section>
+
+  <section class="card" id="scanProgress" hidden aria-live="polite">
+    <div class="progress"><b id="scanPct">0%</b><span class="bar"><i id="scanBar"></i></span>
+      <span class="what" id="scanWhat"></span><button type="button" id="scanCancel">Cancel</button></div>
+  </section>
+  <div id="scanResults" hidden>
+    <section class="card verdict" id="scanVerdict" aria-live="polite"></section>
+    <section class="card scanmap" style="margin-top:14px">
+      <div class="maps-head">
+        <h2>Ticker × timeframe <small id="scanMapNote"></small></h2>
+        <label class="field"><span>Colour by</span><select id="scanMetric"></select></label>
+      </div>
+      <div class="plot" id="scanMap"></div>
+      <div class="legendbar"><span id="sLgLow"></span><span class="ramp" id="sLgRamp"></span><span id="sLgHigh"></span>
+        <span>· faded: short test (under <span id="thinDays"></span> trading days) · × no data · click a square to open that market's sweep</span></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Every market <small id="scanTableNote"></small></h2>
+      <div class="tablewrap"><table id="scanTable"><thead></thead><tbody></tbody></table></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Settings across all markets <small id="setNote"></small></h2>
+      <p class="desc">One setting that works on many markets is far more believable than one that shines on a single market.
+        Ranked by the median <b>in-sample</b> Sharpe over all markets; the out-of-sample columns show whether that held up.</p>
+      <div class="tablewrap"><table id="setTable"></table></div>
+    </section>
+  </div>
 
   <div id="wfResults" hidden>
     <section class="card verdict" id="wfVerdict" aria-live="polite"></section>
@@ -253,6 +331,8 @@ const esc = t => String(t).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;"
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const A = DATA.app, S = A.strategies.find(s => s.id === A.strategy) || A.strategies[0];
 const params = Object.entries(S.params);
+const SCAN = { tickers: [...A.scan.tickers], tfs: [...A.scan.tfs] };
+let scanJob = null;
 
 
 // Strategy menu: built-ins, then files from strategies/ (blocked ones can't be picked)
@@ -420,7 +500,10 @@ function tickerPicker(input, tickers, onPick) {
       if (my === seq) { searching = false; if (enterWaiting) { enterWaiting = false; enterPick(); } }
     }, 250);
   }
-  function pick(sym) { input.value = sym; close(); onPick && onPick(sym); }
+  function pick(sym) {
+    clearTimeout(timer); seq++; searching = enterWaiting = false;     // a late search must not reopen the list
+    input.value = sym; close(); onPick && onPick(sym);
+  }
   // Enter without choosing: exact symbol if listed, else the top result, else what was typed
   function enterPick() {
     const typed = input.value.trim().toUpperCase();
@@ -470,13 +553,16 @@ const tfIn = document.getElementById("tfIn");
 tfIn.innerHTML = A.timeframes.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
 tfIn.value = TF;
 tfIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${tfIn.value}&strategy=${sIn.value}` + costQuery(A.costs); });
+// In "many markets" mode, keep the chosen tickers and timeframes when the page reloads
+const scanQuery = () => document.getElementById("modeIn").value !== "scan" ? "" :
+  `&mode=scan&tickers=${encodeURIComponent(SCAN.tickers.join(","))}&tfs=${SCAN.tfs.join(",")}`;
 const fmtTime = t => typeof t === "number" ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : t;
 tickerPicker(tIn, A.tickers, null);
 const sweepable = A.strategies.filter(s => Object.keys(s.params).length);
 sIn.innerHTML = strategyOptions(sweepable);
 strategyNotice(A);
 sIn.value = S.id;
-sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + costQuery(A.costs); });
+sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + costQuery(A.costs) + scanQuery(); });
 document.getElementById("stratName").textContent = S.name;
 setupGuide(document.getElementById("guideBtn"), document.getElementById("guidePanel"), S, DATA.intraday);
 document.getElementById("splitIn").value = String(A.split);
@@ -530,12 +616,16 @@ if (A.wf.unit === "days") { document.getElementById("trainIn").max = 2000; docum
 document.getElementById("testIn").value = A.wf.test;
 document.getElementById("windowIn").value = A.wf.anchored ? "anchored" : "rolling";
 function showMode() {
-  const wf = modeIn.value === "wf";
+  const wf = modeIn.value === "wf", sc = modeIn.value === "scan";
   document.getElementById("wfFields").hidden = !wf;
   document.getElementById("splitField").hidden = wf;
-  document.getElementById("descSplit").hidden = wf;
+  document.getElementById("descSplit").hidden = wf || sc;
   document.getElementById("descWf").hidden = !wf;
-  document.getElementById("runBtn").textContent = wf ? "Run walk-forward" : "Run sweep";
+  document.getElementById("descScan").hidden = !sc;
+  document.getElementById("marketsBox").hidden = !sc;
+  // one ticker / timeframe at the top only makes sense for a single market
+  tIn.closest("label").hidden = sc; tfIn.closest("label").hidden = sc;
+  document.getElementById("runBtn").textContent = wf ? "Run walk-forward" : sc ? "Run scan" : "Run sweep";
   A.max_combos = wf ? 2000 : 5000;
   if (typeof countCombos === "function") countCombos();
 }
@@ -550,6 +640,17 @@ function countCombos() {
   countEl.textContent = `${n.toLocaleString()} combinations` + (modeIn.value === "wf" ? " per window" : "");
   countEl.classList.toggle("too-many", n > A.max_combos);
   if (n > A.max_combos) countEl.textContent += ` (max ${A.max_combos.toLocaleString()})`;
+  if (modeIn.value === "scan") {
+    const m = SCAN.tickers.length * SCAN.tfs.length, total = n * m;
+    const secs = total * 0.004 + m * 0.5;               // rough: ~4 ms per backtest, plus loading
+    const bad = n > A.max_combos || m > A.scan.max_markets || total > A.scan.max_backtests || m === 0;
+    countEl.textContent = `${n.toLocaleString()} combinations × ${m} market${m === 1 ? "" : "s"} = ${total.toLocaleString()} backtests` +
+      (m === 0 ? " (pick a ticker and a timeframe)" : m > A.scan.max_markets ? ` (max ${A.scan.max_markets} markets)`
+       : total > A.scan.max_backtests ? ` (max ${A.scan.max_backtests.toLocaleString()})`
+       : ` · about ${secs < 90 ? Math.max(1, Math.round(secs)) + " s" : Math.round(secs / 60) + " min"}`);
+    countEl.classList.toggle("too-many", bad);
+    return bad ? Infinity : n;
+  }
   return n;
 }
 document.getElementById("ranges").addEventListener("input", countCombos);
@@ -562,13 +663,275 @@ document.querySelectorAll(".boolRange").forEach(sel => sel.addEventListener("cha
 countCombos();
 const form = document.getElementById("form"), runBtn = document.getElementById("runBtn");
 form.addEventListener("submit", e => {
+  if (modeIn.value === "scan") { e.preventDefault(); if (countCombos() !== Infinity) startScan(); return; }
   const n = countCombos();
   if (n > A.max_combos) { e.preventDefault(); countEl.focus?.(); return; }
   tIn.value = tIn.value.trim().toUpperCase();
   runBtn.disabled = true; runBtn.textContent = `Running ${n.toLocaleString()} backtests…`;
 });
-window.addEventListener("pageshow", () => { runBtn.disabled = false; showMode(); });
+window.addEventListener("pageshow", () => { if (!scanJob) runBtn.disabled = false; showMode(); });
 showMode();
+
+// ---- Many markets: pick tickers x timeframes ----------------------------------------
+const TF_LABEL = Object.fromEntries(A.timeframes);
+function drawChips() {
+  const box = document.getElementById("chips");
+  box.innerHTML = SCAN.tickers.length ? SCAN.tickers.map(t =>
+    `<span class="chip">${esc(t)}<button type="button" data-t="${esc(t)}" aria-label="Remove ${esc(t)}">×</button></span>`).join("")
+    : `<span class="empty">No tickers yet: add some above, or a whole group below.</span>`;
+  const m = SCAN.tickers.length * SCAN.tfs.length;
+  document.getElementById("mkCount").textContent = `${SCAN.tickers.length} ticker${SCAN.tickers.length === 1 ? "" : "s"} × ${SCAN.tfs.length} timeframe${SCAN.tfs.length === 1 ? "" : "s"} = ${m} market${m === 1 ? "" : "s"}`;
+  countCombos();
+}
+function addTickers(list) {
+  for (const t of list) { const u = t.trim().toUpperCase(); if (u && !SCAN.tickers.includes(u)) SCAN.tickers.push(u); }
+  drawChips();
+}
+document.getElementById("chips").addEventListener("click", e => {
+  const b = e.target.closest("button[data-t]"); if (!b) return;
+  SCAN.tickers = SCAN.tickers.filter(t => t !== b.dataset.t); drawChips();
+  document.getElementById("addTicker").focus();
+});
+const addIn = document.getElementById("addTicker");
+tickerPicker(addIn, A.tickers, sym => { addTickers([sym]); addIn.value = ""; });
+addIn.placeholder = "Symbol or name";
+// Whole groups from the popular list, plus whatever is already downloaded
+const groups = {};
+A.tickers.filter(t => t.group !== "Your downloads").forEach(t => (groups[t.group] = groups[t.group] || []).push(t.symbol));
+const quick = document.getElementById("quick");
+quick.innerHTML = `<span>Add a group:</span>` + Object.entries(groups).map(([g, syms]) =>
+  `<button type="button" data-g="${esc(g)}" title="${esc(syms.join(", "))}">${esc(g)} (${syms.length})</button>`).join("") +
+  (A.tickers.some(t => t.saved) ? `<button type="button" data-g="__saved">Downloaded (${A.tickers.filter(t => t.saved).length})</button>` : "") +
+  `<button type="button" data-g="__clear">Clear all</button>`;
+quick.addEventListener("click", e => {
+  const b = e.target.closest("button[data-g]"); if (!b) return;
+  const g = b.dataset.g;
+  if (g === "__clear") { SCAN.tickers = []; drawChips(); return; }
+  addTickers(g === "__saved" ? [...new Set(A.tickers.filter(t => t.saved).map(t => t.symbol))] : groups[g]);
+});
+document.getElementById("tfsBox").insertAdjacentHTML("beforeend", A.timeframes.map(([v, label]) =>
+  `<label><input type="checkbox" value="${v}"${SCAN.tfs.includes(v) ? " checked" : ""}>${esc(label)}</label>`).join(""));
+document.getElementById("tfsBox").addEventListener("change", () => {
+  SCAN.tfs = [...document.querySelectorAll("#tfsBox input:checked")].map(i => i.value); drawChips();
+});
+document.getElementById("thinDays").textContent = A.scan.thin_days;
+
+// Build the address from the form (settings, split, costs, rank) plus the markets
+function scanParams() {
+  const q = new URLSearchParams();
+  for (const [k, v] of new FormData(form)) if (k !== "run" && k !== "ticker" && k !== "tf") q.set(k, v);
+  q.set("strategy", sIn.value); q.set("mode", "scan");
+  q.set("tickers", SCAN.tickers.join(",")); q.set("tfs", SCAN.tfs.join(","));
+  return q;
+}
+async function startScan() {
+  const q = scanParams();
+  history.replaceState(null, "", "/optimize?" + q.toString());     // reload / bookmark keeps the scan setup
+  const prog = document.getElementById("scanProgress");
+  document.getElementById("scanResults").hidden = true;
+  for (const id of ["results", "wfResults"]) document.getElementById(id).hidden = true;
+  prog.hidden = false; runBtn.disabled = true; runBtn.textContent = "Scanning…";
+  const what = document.getElementById("scanWhat"), bar = document.getElementById("scanBar"), pct = document.getElementById("scanPct");
+  const finish = msg => { scanJob = null; runBtn.disabled = false; showMode(); if (msg !== undefined) what.textContent = msg; };
+  try {
+    const r = await fetch("/api/scan/start?" + q.toString()), start = await r.json();
+    if (!r.ok) throw new Error(start.error || r.statusText);
+    scanJob = start.id;
+    while (scanJob === start.id) {
+      const st = await (await fetch(`/api/scan/status?id=${start.id}`)).json();
+      if (st.error && !st.state) throw new Error(st.error);
+      const f = st.total ? st.done / st.total : 0;
+      bar.style.width = (f * 100).toFixed(1) + "%"; pct.textContent = Math.floor(f * 100) + "%";
+      what.textContent = `${st.label} · ${st.done.toLocaleString()} of ${st.total.toLocaleString()} backtests · ${Math.round(st.elapsed)} s`;
+      if (st.state === "done") {
+        finish();
+        try { drawScan(st.result); prog.hidden = true; }
+        catch (err) { console.error(err); what.textContent = `The scan finished, but showing it failed: ${err.message}`; }
+        return;
+      }
+      if (st.state === "cancelled") { finish("Cancelled."); return; }
+      if (st.state === "error") throw new Error(st.error);
+      await new Promise(res => setTimeout(res, 500));
+    }
+  } catch (err) { finish(`Scan failed: ${err.message}`); pct.textContent = "⚠"; }
+}
+document.getElementById("scanCancel").addEventListener("click", () => {
+  if (scanJob) fetch(`/api/scan/cancel?id=${scanJob}`);
+});
+drawChips();
+
+// ---- Many markets: results ---------------------------------------------------------
+function mixHex(a, b, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join("");
+}
+function drawScan(R) {
+  document.getElementById("scanResults").hidden = false;
+  const pct = v => v === null ? "–" : (v * 100).toFixed(1) + "%", num = v => v === null ? "–" : v.toFixed(2);
+  const ok = R.markets.filter(m => !m.error), judged = ok.filter(m => !m.thin && m.best_oos_sharpe !== null);
+  const beats = m => m.best_oos_sharpe !== null && m.bh_oos_sharpe !== null && m.best_oos_sharpe > m.bh_oos_sharpe;
+  const setText = s => !s ? "–" : params.filter(([k, p]) => R.params.includes(k) && (p.type !== "bool" || s[k])).map(([k, p]) =>
+    p.type === "bool" ? (p.label || k) : `${(p.label || k).replace(/ \(.*\)$/, "")} ${s[k]}`).join(", ");
+  const rangeQuery = () => params.map(([k]) => ["from", "to", "step"].map(x =>
+    `&${k}_${x}=${encodeURIComponent(form.elements[`${k}_${x}`].value)}`).join("")).join("");
+  const sweepUrl = m => `/optimize?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&mode=split&split=${R.split}&rank=${R.rank}` +
+    rangeQuery() + costQuery(A.costs) + "&run=1";
+  const chartUrl = m => `/?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&` +
+    Object.entries(m.settings || {}).map(([k, v]) => `${k}=${v}`).join("&") + costQuery(A.costs);
+  const median = xs => { const v = xs.filter(x => x !== null).sort((a, b) => a - b); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; };
+
+  // ---- Verdict ----
+  const v = document.getElementById("scanVerdict");
+  v.classList.remove("good", "weak", "bad");
+  const nb = judged.filter(beats).length, share = judged.length ? nb / judged.length : 0;
+  const cls = !judged.length ? "weak" : share >= 0.6 ? "good" : share >= 0.3 ? "weak" : "bad";
+  v.classList.add(cls);
+  const top = [...judged].sort((a, b) => b.best_oos_sharpe - a.best_oos_sharpe)[0];
+  const byTf = A.timeframes.map(([tf, label]) => {
+    const ms = ok.filter(m => m.tf === tf); if (!ms.length) return "";
+    const j = ms.filter(m => !m.thin);
+    return `<tr><td>${esc(label)}${j.length < ms.length ? `<span class="badge" title="Fewer than ${A.scan.thin_days} trading days out-of-sample">short test</span>` : ""}</td>` +
+      `<td>${ms.filter(beats).length} of ${ms.length}</td><td>${num(median(ms.map(m => m.best_oos_sharpe)))}</td>` +
+      `<td>${num(median(ms.map(m => m.bh_oos_sharpe)))}</td><td>${num(median(ms.map(m => m.median_oos_sharpe)))}</td></tr>`;
+  }).join("");
+  const head = !judged.length ? "Not enough out-of-sample data to judge"
+    : `The settings picked in-sample beat buy & hold out-of-sample in ${nb} of ${judged.length} markets`;
+  v.innerHTML = `<h2>${head}</h2>
+    <p>${top ? `Best out-of-sample: <b>${esc(top.ticker)} on ${esc(TF_LABEL[top.tf] || top.tf)}</b> with <b>${esc(setText(top.settings))}</b>:
+      Sharpe <b>${num(top.best_oos_sharpe)}</b> vs buy & hold ${num(top.bh_oos_sharpe)}. ` : ""}
+      Careful: the best of ${ok.length} markets is partly luck. With many tries, one usually looks great by chance.
+      Trust patterns (a whole timeframe, or most tickers doing well) more than one bright square.</p>
+    <div class="tablewrap tfsum"><table><thead><tr><th>Timeframe</th><th>Beat B&H (OOS)</th><th>Median OOS Sharpe</th><th>Median B&H Sharpe</th><th>Median of all settings</th></tr></thead><tbody>${byTf}</tbody></table></div>
+    <p class="notice">${R.backtests.toLocaleString()} backtests (${R.combos.toLocaleString()} combinations × ${ok.length} markets) in ${R.seconds.toFixed(1)} s.
+      Settings on each market chosen by in-sample ${esc((METRICS[R.rank] || METRICS.sharpe).label.toLowerCase())}; in-sample share ${Math.round(R.split * 100)}%.
+      ${R.markets.length > ok.length ? `${R.markets.length - ok.length} market(s) had no usable data (see the table).` : ""}
+      ${ok.some(m => m.thin) ? `Markets with under ${A.scan.thin_days} trading days out-of-sample are left out of the count above: too short to judge (Yahoo keeps only ~60 days of 5-30 minute bars).` : ""}</p>`;
+
+  // ---- Heatmap: tickers (rows) x timeframes (columns) ----
+  const SM = {
+    oos: { label: "Out-of-sample Sharpe (settings picked in-sample)", get: m => m.best_oos_sharpe, mid: 0, fmt: num },
+    vsbh: { label: "Out-of-sample Sharpe minus buy & hold", get: m => m.best_oos_sharpe === null || m.bh_oos_sharpe === null ? null : m.best_oos_sharpe - m.bh_oos_sharpe, mid: 0, fmt: x => (x > 0 ? "+" : "") + num(x) },
+    oos_cagr: { label: "Out-of-sample return / year", get: m => m.best_oos_cagr, mid: 0, fmt: x => (x * 100).toFixed(0) + "%" },
+    share: { label: "Share of all settings that beat B&H (OOS)", get: m => m.share_beat_bh, mid: 0.5, fmt: x => Math.round(x * 100) + "%" },
+    median: { label: "Median OOS Sharpe over all settings", get: m => m.median_oos_sharpe, mid: 0, fmt: num },
+    is: { label: "Best in-sample Sharpe (optimistic!)", get: m => m.best_is_sharpe, mid: 0, fmt: num },
+  };
+  const sel = document.getElementById("scanMetric");
+  if (!sel.options.length) sel.innerHTML = Object.entries(SM).map(([k, m]) => `<option value="${k}">${esc(m.label)}</option>`).join("");
+  const tickers = [...new Set(R.markets.map(m => m.ticker))];
+  const tfs = A.timeframes.map(([t]) => t).filter(t => R.markets.some(m => m.tf === t));
+  const at = new Map(R.markets.map(m => [m.ticker + "|" + m.tf, m]));
+  const tip = document.getElementById("tip");
+  function drawMap() {
+    const M = SM[sel.value];
+    const vals = ok.map(M.get).filter(x => x !== null && isFinite(x));
+    const span = Math.max(1e-9, ...vals.map(x => Math.abs(x - M.mid)));
+    const color = x => {
+      const t = Math.max(-1, Math.min(1, (x - M.mid) / span));
+      return t >= 0 ? mixHex(css("--panel"), css("--up"), 0.15 + 0.85 * t) : mixHex(css("--panel"), css("--down"), 0.15 + 0.85 * -t);
+    };
+    const cw = 76, ch = 30, padL = 78, padT = 24;
+    const W = padL + tfs.length * cw + 4, H = padT + tickers.length * ch + 4;
+    let svg = `<svg width="${W}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(M.label)} by ticker and timeframe">`;
+    tfs.forEach((tf, i) => svg += `<text x="${padL + i * cw + cw / 2}" y="${padT - 8}" text-anchor="middle">${esc(TF_LABEL[tf] || tf)}</text>`);
+    tickers.forEach((t, j) => {
+      const y = padT + j * ch;
+      svg += `<text x="${padL - 8}" y="${y + ch / 2 + 4}" text-anchor="end">${esc(t)}</text>`;
+      tfs.forEach((tf, i) => {
+        const m = at.get(t + "|" + tf), x = padL + i * cw;
+        if (!m) return;
+        const val = m.error ? null : M.get(m);
+        const fill = val === null || !isFinite(val) ? css("--empty") : color(val);
+        svg += `<rect class="cell" tabindex="0" data-k="${esc(t + "|" + tf)}" x="${x + 1}" y="${y + 1}" width="${cw - 2}" height="${ch - 2}" rx="4" fill="${fill}"${m.thin ? ' opacity=".45"' : ""}></rect>`;
+        svg += `<text class="val" x="${x + cw / 2}" y="${y + ch / 2 + 4}" text-anchor="middle" style="fill:var(--fg)">${m.error ? "×" : val === null ? "–" : esc(M.fmt(val))}</text>`;
+      });
+    });
+    document.getElementById("scanMap").innerHTML = svg + `</svg>`;
+    document.getElementById("sLgLow").textContent = M.fmt(M.mid - span);
+    document.getElementById("sLgHigh").textContent = M.fmt(M.mid + span);
+    document.getElementById("sLgRamp").style.background = `linear-gradient(90deg, ${css("--down")}, ${css("--panel")}, ${css("--up")})`;
+    document.getElementById("scanMapNote").textContent = `${tickers.length} tickers × ${tfs.length} timeframes · green = better`;
+  }
+  drawMap();
+  sel.onchange = drawMap;
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawMap);
+  new MutationObserver(drawMap).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  const mapEl = document.getElementById("scanMap");
+  const showTip = (el, ev) => {
+    const m = at.get(el.dataset.k);
+    tip.innerHTML = `<b>${esc(m.ticker)} · ${esc(TF_LABEL[m.tf] || m.tf)}</b><br>` + (m.error ? esc(m.error) :
+      `Settings (picked in-sample): <b>${esc(setText(m.settings))}</b><br>` +
+      `Sharpe in-sample: <b>${num(m.best_is_sharpe)}</b> → out-of-sample: <b>${num(m.best_oos_sharpe)}</b><br>` +
+      `Buy & hold out-of-sample: <b>${num(m.bh_oos_sharpe)}</b><br>` +
+      `Return / year OOS: <b>${pct(m.best_oos_cagr)}</b> (B&H ${pct(m.bh_oos_cagr)})<br>` +
+      `Test: ${m.split} → ${m.end} (${m.oos_days} trading days)${m.thin ? " · <b>too short to trust</b>" : ""}`);
+    tip.hidden = false;
+    const bx = ev?.clientX ?? el.getBoundingClientRect().right, by = ev?.clientY ?? el.getBoundingClientRect().top;
+    tip.style.left = Math.max(8, Math.min(innerWidth - tip.offsetWidth - 8, bx + 14)) + "px";
+    tip.style.top = Math.max(8, Math.min(innerHeight - tip.offsetHeight - 8, by + 14)) + "px";
+  };
+  const open = c => { const m = at.get(c.dataset.k); if (!m.error) location.href = sweepUrl(m); };
+  mapEl.onmousemove = e => { const c = e.target.closest("rect.cell"); c ? showTip(c, e) : (tip.hidden = true); };
+  mapEl.onmouseleave = () => { tip.hidden = true; };
+  mapEl.onfocusin = e => { const c = e.target.closest("rect.cell"); if (c) showTip(c); };
+  mapEl.onfocusout = () => { tip.hidden = true; };
+  mapEl.onclick = e => { const c = e.target.closest("rect.cell"); if (c) open(c); };
+  mapEl.onkeydown = e => { const c = e.target.closest("rect.cell"); if (c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(c); } };
+
+  // ---- Markets table ----
+  const cols = [
+    { key: "ticker", label: "Ticker", l: true, fmt: (x, m) => `<a href="${chartUrl(m)}" title="Open on the chart with these settings">${esc(x)}</a>` },
+    { key: "tf", label: "Timeframe", l: true, fmt: (x, m) => esc(TF_LABEL[x] || x) + (m.thin ? `<span class="badge">short test</span>` : "") },
+    { key: "settings", label: "Settings (picked in-sample)", l: true, fmt: x => esc(setText(x)), nosort: true },
+    { key: "best_is_sharpe", label: "Sharpe IS", fmt: num },
+    { key: "best_oos_sharpe", label: "Sharpe OOS", fmt: num, sep: true },
+    { key: "bh_oos_sharpe", label: "B&H Sharpe OOS", fmt: num },
+    { key: "best_oos_cagr", label: "Return / yr OOS", fmt: pct, signed: true },
+    { key: "bh_oos_cagr", label: "B&H return / yr OOS", fmt: pct, signed: true },
+    { key: "best_oos_max_dd", label: "Worst DD OOS", fmt: pct, signed: true },
+    { key: "best_oos_trades", label: "Trades OOS", fmt: x => x === null ? "–" : Math.round(x).toLocaleString() },
+    { key: "share_beat_bh", label: "Settings beating B&H", fmt: x => x === null ? "–" : Math.round(x * 100) + "%", sep: true },
+    { key: "oos_days", label: "Test days", fmt: x => x === undefined ? "–" : x.toLocaleString() },
+    { key: "sweep", label: "", nosort: true, fmt: (x, m) => m.error ? "" : `<a href="${sweepUrl(m)}">sweep →</a>` },
+  ];
+  let sortKey = "best_oos_sharpe", dir = -1;
+  const tbl = document.getElementById("scanTable");
+  function drawTable() {
+    tbl.tHead.innerHTML = `<tr>` + cols.map(c => `<th class="${c.l ? "l " : ""}${c.sep ? "sep " : ""}${c.key === sortKey ? "sorted" : ""}">` +
+      (c.nosort ? esc(c.label) : `<button type="button" data-k="${c.key}">${esc(c.label)}${c.key === sortKey ? (dir < 0 ? " ↓" : " ↑") : ""}</button>`) + `</th>`).join("") + `</tr>`;
+    const rows = [...R.markets].sort((a, b) => {
+      if (!!a.error !== !!b.error) return a.error ? 1 : -1;
+      const x = a[sortKey], y = b[sortKey];
+      if (x === null || x === undefined) return 1; if (y === null || y === undefined) return -1;
+      return typeof x === "string" ? dir * x.localeCompare(y) : dir * (x - y);
+    });
+    tbl.tBodies[0].innerHTML = rows.map(m => m.error
+      ? `<tr class="err"><td class="l">${esc(m.ticker)}</td><td class="l">${esc(TF_LABEL[m.tf] || m.tf)}</td><td class="l" colspan="${cols.length - 2}">${esc(m.error)}</td></tr>`
+      : `<tr class="${m.thin ? "thin" : ""}">` + cols.map(c => {
+          const x = c.key === "sweep" ? null : m[c.key];
+          const cl = [c.l ? "l" : "", c.sep ? "sep" : "", c.signed && x !== null ? (x >= 0 ? "pos" : "neg") : ""].join(" ").trim();
+          return `<td class="${cl}">${c.fmt(x === undefined ? null : x, m)}</td>`;
+        }).join("") + `</tr>`).join("");
+    document.getElementById("scanTableNote").textContent = `${R.markets.length} markets · click a column to sort · OOS = out-of-sample, B&H = buy & hold`;
+  }
+  tbl.tHead.onclick = e => {
+    const b = e.target.closest("button[data-k]"); if (!b) return;
+    if (b.dataset.k === sortKey) dir = -dir; else { sortKey = b.dataset.k; dir = ["ticker", "tf"].includes(sortKey) ? 1 : -1; }
+    drawTable();
+  };
+  drawTable();
+
+  // ---- Settings across markets ----
+  const sp = params.filter(([k]) => R.params.includes(k));
+  document.getElementById("setNote").textContent = R.settings.length ? `top ${R.settings.length} of ${R.settings_count.toLocaleString()}` : "";
+  document.getElementById("setTable").innerHTML = !R.settings.length ? `<tbody><tr><td class="l">No setting was valid on every market.</td></tr></tbody>` :
+    `<thead><tr><th>#</th>${sp.map(([k, p]) => `<th>${esc(k)}</th>`).join("")}<th class="sep">Median Sharpe IS</th><th>Median Sharpe OOS</th><th>Worst Sharpe OOS</th><th>Beat B&H (OOS)</th></tr></thead><tbody>` +
+    R.settings.map((r, i) => `<tr><td>${i + 1}</td>${sp.map(([k]) => `<td>${r[k]}</td>`).join("")}<td class="sep">${num(r.median_is_sharpe)}</td>` +
+      `<td class="${r.median_oos_sharpe >= 0 ? "pos" : "neg"}">${num(r.median_oos_sharpe)}</td><td class="${r.worst_oos_sharpe >= 0 ? "pos" : "neg"}">${num(r.worst_oos_sharpe)}</td>` +
+      `<td>${r.beat_bh} of ${r.markets}</td></tr>`).join("") + `</tbody>`;
+  document.getElementById("scanResults").scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 
 // ---- Walk-forward results -------------------------------------------------------------

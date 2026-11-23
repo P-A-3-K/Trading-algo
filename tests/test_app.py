@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -141,3 +142,25 @@ def test_index_tickers_allowed():
     for bad in ["^^X", "SP^Y", "^"]:
         with pytest.raises(ValueError):
             dl.clean_ticker(bad)
+
+
+def test_market_scan_runs_in_the_background(server):
+    status, body = get(server + "/optimize?strategy=SmaCrossover&mode=scan&tickers=TEST,NOPE&tfs=1d")
+    assert status == 200 and '"tickers":["TEST","NOPE"]' in body      # the page restores the markets
+    q = "strategy=SmaCrossover&fast_from=10&fast_to=30&fast_step=10&slow_from=50&slow_to=100&slow_step=50&tickers=TEST,NOPE&tfs=1d"
+    status, body = get(server + "/api/scan/start?" + q)
+    assert status == 200, body
+    job = json.loads(body)["id"]
+    for _ in range(100):
+        st = json.loads(get(server + f"/api/scan/status?id={job}")[1])
+        if st["state"] != "running":
+            break
+        time.sleep(0.1)
+    assert st["state"] == "done", st
+    m = {r["ticker"]: r for r in st["result"]["markets"]}
+    assert m["TEST"]["error"] is None and m["NOPE"]["error"]
+    # too big is refused at once, with a message
+    status, body = get(server + "/api/scan/start?strategy=SmaCrossover&fast_from=2&fast_to=400&fast_step=1"
+                       "&slow_from=5&slow_to=500&slow_step=10&tickers=" + ",".join(f"T{i}" for i in range(30)) + "&tfs=1d")
+    assert status == 400 and "max" in json.loads(body)["error"]
+    assert get(server + "/api/scan/status?id=999")[0] == 400

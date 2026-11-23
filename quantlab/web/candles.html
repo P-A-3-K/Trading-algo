@@ -627,7 +627,10 @@ function tickerPicker(input, tickers, onPick) {
       if (my === seq) { searching = false; if (enterWaiting) { enterWaiting = false; enterPick(); } }
     }, 250);
   }
-  function pick(sym) { input.value = sym; close(); onPick && onPick(sym); }
+  function pick(sym) {
+    clearTimeout(timer); seq++; searching = enterWaiting = false;     // a late search must not reopen the list
+    input.value = sym; close(); onPick && onPick(sym);
+  }
   // Enter without choosing: exact symbol if listed, else the top result, else what was typed
   function enterPick() {
     const typed = input.value.trim().toUpperCase();
