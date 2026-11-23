@@ -197,6 +197,7 @@ footer a { color: inherit; }
     <button type="submit" class="run" id="runBtn">Run</button>
     <button type="button" id="resetBtn" hidden title="Put every setting back to the strategy's default">Reset</button>
     <a class="navlink" id="optLink" href="/optimize" title="Try every combination of this strategy's settings">Optimize →</a>
+    <a class="navlink" id="portLink" href="/portfolio" title="Add this strategy, ticker and timeframe as a leg of your portfolio">＋ Portfolio</a>
     <a class="navlink" href="/settings" title="Where the candles come from; connect Alpaca">Data</a>
     <span class="desc" id="stratDesc"></span>
   </form>
@@ -802,6 +803,19 @@ if (DATA.app) {
   const sweepable = Object.keys(params).length > 0;
   optLink.hidden = !sweepable;
   if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&tf=${DATA.timeframe || "1d"}&strategy=${encodeURIComponent(A.strategy)}` + costQuery(A.costs);
+  // "+ Portfolio": add what's on screen as a new leg of the portfolio draft
+  const portLink = document.getElementById("portLink");
+  portLink.hidden = !sweepable;
+  portLink.addEventListener("click", e => {
+    e.preventDefault();
+    let legs = [];
+    try { legs = JSON.parse(localStorage.getItem("quantlab.portfolio.draft") || "[]"); } catch (err) {}
+    if (!Array.isArray(legs)) legs = [];
+    const settings = Object.fromEntries(Object.entries(A.settings || {}).filter(([k]) => params[k]));
+    legs.push({ ticker: DATA.ticker, tf: DATA.timeframe || "1d", strategy: A.strategy, settings, weight: 25 });
+    try { localStorage.setItem("quantlab.portfolio.draft", JSON.stringify(legs.slice(-12))); } catch (err) {}
+    location.href = "/portfolio";
+  });
   form.hidden = false;
 }
 

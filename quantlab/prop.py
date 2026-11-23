@@ -75,6 +75,31 @@ def daily_parts(returns: pd.Series, size: float):
     return np.expm1(close), np.expm1(np.minimum(low, 0.0))
 
 
+@dataclass
+class DailyResults:
+    """Results already per trading day: close-to-close return and the day's lowest
+    point (both as fractions), e.g. a combined portfolio. A size scales them as if
+    the position were rebalanced to that size every day."""
+    ret: pd.Series
+    low: pd.Series
+
+
+def parts_of(source):
+    """function(size) -> (daily return, daily low) arrays, for bar returns or DailyResults."""
+    if isinstance(source, DailyResults):
+        r, lo = source.ret.to_numpy(dtype=float), source.low.to_numpy(dtype=float)
+        return lambda size: (np.maximum(size * r, -0.999999), np.minimum(np.maximum(size * lo, -0.999999), 0.0))
+    return lambda size: daily_parts(source, size)
+
+
+def daily_results(returns: pd.Series) -> DailyResults:
+    """Bar returns -> DailyResults indexed by trading date."""
+    ret, low = daily_parts(returns, 1.0)
+    days = pd.Index(returns.index.date).unique() if isinstance(returns.index, pd.DatetimeIndex) else returns.index
+    idx = pd.DatetimeIndex(days)
+    return DailyResults(pd.Series(ret, index=idx), pd.Series(low, index=idx))
+
+
 def bootstrap_days(n_days_hist: int, sims: int, length: int, block: int, rng) -> np.ndarray:
     """Indices of historical days for `sims` futures of `length` days, in blocks."""
     block = max(1, min(block, n_days_hist))
@@ -107,19 +132,21 @@ def run_phase(ret: np.ndarray, low: np.ndarray, rules: Rules, target: float):
     return outcome, when
 
 
-def check(returns: pd.Series, rules: Rules = None, sizes=None, sims: int = 2000,
+def check(returns, rules: Rules = None, sizes=None, sims: int = 2000,
           horizon_days: int = 2 * TRADING_DAYS, funded_days: int = TRADING_DAYS,
           block: int = 10, seed: int = 0) -> dict:
     """Pass / fail odds of the challenge at several position sizes.
 
-    returns: the strategy's returns per bar (any timeframe), with a DatetimeIndex.
+    returns: the strategy's returns per bar (any timeframe), with a DatetimeIndex,
+             or DailyResults (e.g. a combined portfolio).
     horizon_days: how long we let each phase run when there's no time limit.
     """
     rules = rules or Rules()
+    parts = parts_of(returns)
     safe_exact = safe_size(returns, rules)
     sizes = sorted(set(list(sizes or SIZES) + ([safe_exact] if safe_exact and not sizes else [])))
     rng = np.random.default_rng(seed)
-    n_hist = len(pd.Index(returns.index.date).unique())
+    n_hist = len(parts(1.0)[0])
     if n_hist < 40:
         raise ValueError(f"Only {n_hist} trading days of results: too few to simulate a challenge.")
     length = rules.max_days or horizon_days
@@ -127,7 +154,7 @@ def check(returns: pd.Series, rules: Rules = None, sizes=None, sims: int = 2000,
     fund_pick = bootstrap_days(n_hist, sims, funded_days, block, rng)
     rows = []
     for size in sizes:
-        ret, low = daily_parts(returns, size)
+        ret, low = parts(size)
         o1, t1 = run_phase(ret[picks[0]], low[picks[0]], rules, rules.target)
         if rules.target2:
             o2, t2 = run_phase(ret[picks[1]], low[picks[1]], rules, rules.target2)
@@ -158,14 +185,14 @@ def check(returns: pd.Series, rules: Rules = None, sizes=None, sims: int = 2000,
             "block": block}
 
 
-def history_risk(returns: pd.Series, size: float):
+def history_risk(returns, size: float):
     """(worst drawdown, worst day) the past would have had at this size, from intraday lows."""
-    ret, low = daily_parts(returns, size)
+    ret, low = parts_of(returns)(size)
     day_start = np.r_[1.0, np.cumprod(1 + ret)[:-1]]
     return float((day_start * (1 + low) / np.maximum.accumulate(day_start) - 1).min()), float(low.min())
 
 
-def safe_size(returns: pd.Series, rules: Rules, margin: float = 0.5, top: float = 10.0):
+def safe_size(returns, rules: Rules, margin: float = 0.5, top: float = 10.0):
     """Largest size (2 decimals) whose PAST worst drawdown and worst day use at most
     `margin` (half) of the limits: the future is usually rougher than the past."""
     def ok(size):

@@ -1,0 +1,603 @@
+<title>QuantLab Portfolio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Portfolio page: legs editor, then results: verdict, combined growth chart, stats, correlation, prop check. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #15191f; --muted: #5d6673; --line: #dfe3e8;
+  --grid: #eceff3; --up: #12855f; --down: #c8423b; --accent: #2f5fd0; --warn: #a86200; --empty: #eceff3;
+  --c1: #2f5fd0; --c2: #b86e00; --c3: #12855f; --c4: #a63d8f; --c5: #c8423b; --c6: #2a8fa6;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff; --warn: #f0a63a; --empty: #1c2229;
+  --c1: #7aa2ff; --c2: #f0a63a; --c3: #2fbf8a; --c4: #d58ac6; --c5: #ef6a61; --c6: #5cc4dc; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff; --warn: #f0a63a; --empty: #1c2229;
+  --c1: #7aa2ff; --c2: #f0a63a; --c3: #2fbf8a; --c4: #d58ac6; --c5: #ef6a61; --c6: #5cc4dc; color-scheme: dark; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
+.wrap { box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; max-width: 1400px; margin: 0 auto;
+  padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { margin: 0; font: 600 22px/1.2 var(--sans); }
+h2 { margin: 0; font: 600 16px/1.2 var(--sans); }
+h1 small, h2 small { font: 400 13px var(--sans); color: var(--muted); margin-left: 6px; }
+a { color: var(--accent); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.brand { font: 600 15px/1 var(--sans); letter-spacing: .02em; }
+.navlink { font: 500 13px/1 var(--mono); }
+.desc { color: var(--muted); font-size: 13px; margin: 6px 0 0; max-width: 90ch; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field > span, .field .lbl { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+input, select { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
+input:invalid { border-color: var(--down); }
+input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button { font: 500 13px/1 var(--mono); letter-spacing: .02em; color: var(--muted); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; cursor: pointer; }
+button:hover { color: var(--fg); }
+button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; }
+button.run:disabled { opacity: .7; cursor: progress; }
+[hidden] { display: none !important; }
+
+/* Legs editor */
+.legs { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.leg { display: grid; grid-template-columns: 1.6em minmax(7em, 9em) minmax(7em, 9em) minmax(11em, 15em) 1fr 6.5em auto; gap: 8px 10px;
+  align-items: end; padding: 10px; border: 1px solid var(--line); border-radius: 8px; border-left: 4px solid var(--legc, var(--line)); }
+.leg .num { font: 600 13px var(--mono); color: var(--muted); align-self: center; }
+.leg input.tk { text-transform: uppercase; width: 100%; box-sizing: border-box; }
+.leg select { width: 100%; }
+.leg .weight { width: 100%; box-sizing: border-box; }
+.leg .settings { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: end; }
+.leg .settings input { width: 5.5em; }
+.leg .settings select { width: auto; }
+.leg .rm { padding: 8px 10px; }
+.leg .rm:hover { color: var(--down); border-color: var(--down); }
+@media (max-width: 900px) {
+  .leg { grid-template-columns: 1.6em 1fr 1fr; }
+  .leg .settings { grid-column: 1 / -1; }
+  .leg .strat { grid-column: 2 / -1; }
+}
+.row2 { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-top: 14px; }
+.total { font: 500 13px var(--mono); color: var(--muted); align-self: center; }
+.costFields { display: contents; }
+.saved { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+#saveName { width: 12em; }
+
+/* Results */
+.verdict { border-left: 4px solid var(--muted); }
+.verdict.good { border-left-color: var(--up); } .verdict.weak { border-left-color: var(--warn); } .verdict.bad { border-left-color: var(--down); }
+.verdict p { margin: 6px 0 0; max-width: 85ch; }
+.kpis { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-top: 12px; }
+.kpi span { display: block; font: 500 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.kpi b { font: 500 18px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+.stage { position: relative; height: clamp(300px, 44vh, 480px); margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+#eqChart { position: absolute; inset: 0; }
+.legend { position: absolute; top: 8px; left: 8px; z-index: 3; pointer-events: none; padding: 2px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent); font: 12px/1.5 var(--mono); color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 2px 12px; max-width: calc(100% - 90px); }
+.legend b { color: var(--fg); font-weight: 500; }
+.sw { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+.tablewrap { overflow-x: auto; margin-top: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th { font: 500 11px/1.25 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); white-space: normal; vertical-align: bottom; }
+td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+td.l, th.l { text-align: left; font-family: var(--sans); white-space: normal; }
+td.pos { color: var(--up); } td.neg { color: var(--down); }
+tr.port td { font-weight: 600; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+tr.bench td { color: var(--muted); font-style: italic; }
+.corr td.cell { min-width: 4em; text-align: center; }
+.note { color: var(--muted); font-size: 12px; margin: 8px 0 0; max-width: 90ch; }
+.notice-box { border: 1px solid var(--line); border-left: 4px solid var(--down); border-radius: 8px; background: var(--panel); padding: 10px 14px; font-size: 13px; }
+.prop .rules { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-top: 10px; }
+.prop .rules input { width: 5.5em; }
+.prop tr.safe td { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.prop td.bad { color: var(--down); } .prop td.good { color: var(--up); }
+footer { color: var(--muted); font-size: 12px; }
+.tpick-host { position: relative; }
+.tpick { text-transform: none; letter-spacing: normal; position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; width: min(440px, calc(100vw - 32px));
+  max-height: min(380px, 60vh); overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.18); padding: 4px 0; text-transform: none; letter-spacing: 0; }
+.tpick[hidden] { display: none; }
+.tpick-head { padding: 8px 12px 4px; font: 600 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tpick-hint { padding: 8px 12px; font: 400 12px/1.4 var(--sans); color: var(--muted); }
+.tpick-opt { display: grid; grid-template-columns: 5.5em 1fr; column-gap: 10px; padding: 6px 12px; cursor: pointer; }
+.tpick-opt b { font: 600 13px/1.4 var(--mono); color: var(--fg); grid-row: span 2; align-self: center; overflow-wrap: anywhere; }
+.tpick-name { font: 400 13px/1.35 var(--sans); color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpick-meta { font: 400 11px/1.35 var(--sans); color: var(--muted); }
+.tpick-opt:hover, .tpick-opt.on { background: var(--grid); }
+.tpick-opt.dis { cursor: not-allowed; opacity: .55; }
+</style>
+
+<div class="wrap">
+  <div class="card top"><span class="brand">QuantLab</span>
+    <a class="navlink" href="/">← Chart</a><a class="navlink" href="/optimize">Optimize</a><a class="navlink" href="/settings">Data</a></div>
+  <div class="notice-box" id="notice" role="status" hidden></div>
+
+  <section class="card" aria-labelledby="pTitle">
+    <h1 id="pTitle">Portfolio <small>several strategies, one account</small></h1>
+    <p class="desc">Each row (a <b>leg</b>) is a ticker, timeframe and strategy with a weight (share of the account).
+      They are backtested separately and combined day by day. Legs that don't move together cancel part of each other's
+      bad days, so the whole can be smoother than any part. Weights can add up to more than 100% (leverage) or less (cash).</p>
+    <div class="legs" id="legs"></div>
+    <div class="row2">
+      <button type="button" id="addLeg">＋ Add leg</button>
+      <button type="button" id="eqW" title="Same weight for every leg, keeping the total">Equal weights</button>
+      <button type="button" id="riskW" title="Each leg gets the same volatility budget (needs one run first)" disabled>Equal risk</button>
+      <span class="total" id="total"></span>
+    </div>
+    <div class="row2">
+      <label class="field" title="How far back to load intraday candles"><span>History (intraday legs)</span><select id="histIn"></select></label>
+      <label class="field"><span>Judge from (optional)</span><input type="date" id="fromIn"></label>
+      <span id="costsIn" style="display:contents"></span>
+      <button type="button" class="run" id="runBtn">Run portfolio</button>
+    </div>
+    <div class="saved">
+      <label class="field"><span>Save as</span><input id="saveName" placeholder="Name" maxlength="40"></label>
+      <button type="button" id="saveBtn">Save</button>
+      <label class="field"><span>Saved portfolios</span><select id="loadIn"><option value="">–</option></select></label>
+      <button type="button" id="delBtn">Delete</button>
+    </div>
+  </section>
+
+  <div id="results" hidden>
+    <section class="card verdict" id="verdict" aria-live="polite"></section>
+    <section class="card" style="margin-top:14px">
+      <h2>Growth of $10,000 <small id="chartNote"></small></h2>
+      <div class="stage"><div class="legend" id="legend"></div><div id="eqChart"></div></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>Each leg and the whole <small>each leg's own numbers at 100%; the portfolio uses the weights</small></h2>
+      <div class="tablewrap"><table id="statsTable"></table></div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <h2>How the legs move together <small>correlation of daily returns: 1 = in lockstep, 0 = unrelated, −1 = opposite</small></h2>
+      <div class="tablewrap"><table class="corr" id="corrTable"></table></div>
+      <p class="note" id="corrNote"></p>
+    </section>
+    <section class="card prop" style="margin-top:14px">
+      <h2>Prop firm check <small>the combined account against challenge rules, at several sizes</small></h2>
+      <div class="rules" id="propRules"></div>
+      <p id="propVerdict" style="margin:10px 0 0;max-width:85ch"></p>
+      <div class="tablewrap" id="propTableWrap" hidden><table id="propTable"></table></div>
+      <p class="note" id="propNote"></p>
+    </section>
+  </div>
+  <footer>Combined daily, rebalanced to the weights each day. Losses for the prop check add up each leg's lowest point of the day (cautious).</footer>
+</div>
+
+<script>/*__LIBRARY__*/</script>
+<script>
+const DATA = /*__DATA__*/null;
+const esc = t => String(t).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const A = DATA;
+// Strategy menu: built-ins, then files from strategies/ (blocked ones can't be picked)
+function strategyOptions(list) {
+  const opt = s => `<option value="${esc(s.id)}"${s.problem ? " disabled" : ""} title="${esc(s.problem ? "Blocked: " + s.problem : s.file || "Built-in")}">` +
+    `${esc(s.name)}${s.problem ? " ⚠ blocked" : ""}</option>`;
+  const mine = list.filter(s => s.source === "user");
+  return `<optgroup label="Built-in">${list.filter(s => s.source !== "user").map(opt).join("")}</optgroup>` +
+    (mine.length ? `<optgroup label="Your strategies (strategies/ folder)">${mine.map(opt).join("")}</optgroup>` : "");
+}
+// A notice when a strategy file couldn't be loaded or a strategy is blocked
+function strategyNotice(app) {
+  const items = app.errors.map(e => `<li><code>${esc(e.file)}</code> didn't load: ${esc(e.error)}</li>`)
+    .concat(app.strategies.filter(s => s.problem).map(s =>
+      `<li><code>${esc(s.file)}</code>: <b>${esc(s.name)}</b> is blocked because ${esc(s.problem)}.</li>`));
+  const el = document.getElementById("stratNotice");
+  if (!items.length) { el.hidden = true; return; }
+  el.innerHTML = `<b>Strategy file problems</b> (fix the file and reload the page)<ul>${items.join("")}</ul>`;
+  el.hidden = false;
+}
+
+
+
+// Keep the cost choice when moving between pages
+function costQuery(C) {
+  if (!C) return "";
+  if (C.preset !== "custom") return `&cost=${C.preset}`;
+  return "&cost=custom" + Object.entries(C.values).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join("");
+}
+// Costs menu: presets, or Custom with each setting (shared by chart and optimizer pages)
+function costControls(slot, C, formId, onPreset) {
+  const NAMES = { realistic: "Realistic", flat5: "Flat 0.05% per trade", none: "No costs", expensive: "Expensive (small stocks)", custom: "Custom…" };
+  const FIELDS = [["c_comm", "Commission (bp)"], ["c_spread", "Spread (bp)"], ["c_ext", "Spread outside 9:30-16 (bp)"],
+                  ["c_slip", "Slippage (x bar range)"], ["c_impact", "Impact factor"], ["c_account", "Account ($)"]];
+  const f = formId ? ` form="${formId}"` : "";
+  slot.innerHTML = `<label class="field" title="What each trade costs beyond the chart price"><span>Costs</span><select name="cost"${f} class="costSel">` +
+    Object.entries(NAMES).map(([k, v]) => `<option value="${k}"${k === C.preset ? " selected" : ""}>${v}</option>`).join("") + `</select></label>` +
+    `<span class="costFields"${C.preset === "custom" ? "" : " hidden"}>` +
+    FIELDS.map(([k, label]) => `<label class="field param"><span>${label}</span><input type="number" name="${k}"${f} value="${C.values[k]}" min="0" step="any"${C.preset === "custom" ? "" : " disabled"}></label>`).join("") +
+    `</span>`;
+  const sel = slot.querySelector(".costSel"), box = slot.querySelector(".costFields");
+  sel.addEventListener("change", () => {
+    const custom = sel.value === "custom";
+    box.hidden = !custom;
+    box.querySelectorAll("input").forEach(i => {
+      i.disabled = !custom;                                   // presets don't send the fields
+      if (custom) i.value = C.presets[C.preset === "custom" ? "realistic" : C.preset][i.name];
+    });
+    if (!custom && onPreset) onPreset();
+  });
+}
+
+
+// ---- Ticker picker: browse popular tickers, or search by company/fund name -------------
+function tickerPicker(input, tickers, onPick) {
+  const host = input.closest("label");
+  host.classList.add("tpick-host");
+  input.removeAttribute("list");
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-expanded", "false");
+  input.placeholder = "Symbol or name";
+  const box = document.createElement("div");
+  box.className = "tpick"; box.id = input.id + "-list"; box.setAttribute("role", "listbox"); box.hidden = true;
+  input.setAttribute("aria-controls", box.id);
+  host.appendChild(box);
+  let items = [], active = -1, timer = null, seq = 0, searching = false, enterWaiting = false;
+  const saved = new Set(tickers.filter(t => t.saved).map(t => t.symbol));
+  const row = (r, extra = "") => {
+    const meta = [r.type, r.exchange, r.group].filter(Boolean).join(" · ");
+    const dis = r.supported === false;
+    return `<div class="tpick-opt${dis ? " dis" : ""}" role="option" data-sym="${esc(r.symbol)}"${dis ? ' aria-disabled="true"' : ""}>` +
+      `<b>${esc(r.symbol)}</b><span class="tpick-name">${esc(r.name || "")}</span>` +
+      `<span class="tpick-meta">${esc(meta)}${saved.has(r.symbol) ? " · ✓ downloaded" : ""}${dis ? " · not supported yet" : ""}${extra}</span></div>`;
+  };
+  const head = t => `<div class="tpick-head">${esc(t)}</div>`;
+  function localMatches(q) {
+    q = q.toLowerCase();
+    const score = r => {
+      const s = r.symbol.toLowerCase(), n = (r.name || "").toLowerCase();
+      if (s === q || s === "^" + q) return 0;
+      if (s.replace("^", "").startsWith(q)) return 1;
+      if (n.split(/[\s(]+/).some(w => w.startsWith(q))) return 2;
+      return n.includes(q) ? 3 : null;
+    };
+    return tickers.map((r, i) => [score(r), i, r]).filter(x => x[0] !== null)
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, 8).map(x => x[2]);
+  }
+  function render(html) {
+    box.innerHTML = html; box.hidden = false; input.setAttribute("aria-expanded", "true");
+    items = [...box.querySelectorAll(".tpick-opt:not(.dis)")]; active = -1;
+    // keep it on screen: shift left if it would stick out past the right edge
+    box.style.left = "0px";
+    const over = box.getBoundingClientRect().right - (document.documentElement.clientWidth - 16);
+    if (over > 0) box.style.left = -over + "px";
+  }
+  function close() { box.hidden = true; input.setAttribute("aria-expanded", "false"); active = -1; }
+  function browse() {
+    const groups = {};
+    tickers.forEach(t => (groups[t.group] = groups[t.group] || []).push(t));
+    render(`<div class="tpick-hint">Type a symbol or a name (e.g. "apple", "gold", "nasdaq") to search all of Yahoo Finance.</div>` +
+      Object.entries(groups).map(([g, rs]) => head(g) + rs.map(r => row(r)).join("")).join(""));
+  }
+  function searchFor(q) {
+    const local = localMatches(q);
+    const localHtml = local.length ? head("From the popular list") + local.map(r => row(r)).join("") : "";
+    render(localHtml + `<div class="tpick-hint">Searching Yahoo Finance…</div>`);
+    clearTimeout(timer);
+    const my = ++seq;
+    searching = true;
+    timer = setTimeout(async () => {
+      try {
+        const res = await (await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json();
+        if (my !== seq) return;                              // a newer search is running
+        const remote = res.remote || [];
+        const html = localHtml + (remote.length ? head("From Yahoo Finance") + remote.map(r => row(r)).join("") : "") +
+          (res.error ? `<div class="tpick-hint">${esc(res.error)}</div>` : "") +
+          (!local.length && !remote.length ? `<div class="tpick-hint">No matches for "${esc(q)}". Check the spelling, or try the company name.</div>` : "");
+        render(html);
+      } catch (e) {
+        if (my === seq) render(localHtml + `<div class="tpick-hint">Online search unavailable; showing the built-in list only.</div>`);
+      }
+      if (my === seq) { searching = false; if (enterWaiting) { enterWaiting = false; enterPick(); } }
+    }, 250);
+  }
+  function pick(sym) {
+    clearTimeout(timer); seq++; searching = enterWaiting = false;     // a late search must not reopen the list
+    input.value = sym; close(); onPick && onPick(sym);
+  }
+  // Enter without choosing: exact symbol if listed, else the top result, else what was typed
+  function enterPick() {
+    const typed = input.value.trim().toUpperCase();
+    const syms = items.map(i => i.dataset.sym);
+    if (syms.includes(typed)) return pick(typed);
+    if (syms.length) return pick(syms[0]);
+    close(); onPick ? onPick(typed) : input.form?.requestSubmit();
+  }
+  function move(d) {
+    if (!items.length) return;
+    items[active]?.classList.remove("on");
+    active = (active + d + items.length) % items.length;
+    items[active].classList.add("on"); items[active].scrollIntoView({ block: "nearest" });
+    input.setAttribute("aria-activedescendant", "");
+  }
+  input.addEventListener("focus", () => { input.select(); browse(); });
+  input.addEventListener("input", () => {
+    input.value = input.value.toUpperCase().replace(/\s+/g, " ").trimStart();
+    const q = input.value.trim();
+    q ? searchFor(q) : browse();
+  });
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (box.hidden) browse(); move(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+    else if (e.key === "Escape") { close(); }
+    else if (e.key === "Enter" && !box.hidden && active >= 0) { e.preventDefault(); pick(items[active].dataset.sym); }
+    else if (e.key === "Enter" && input.value.trim()) {
+      e.preventDefault();
+      const typed = input.value.trim().toUpperCase();
+      if (items.some(i => i.dataset.sym === typed)) pick(typed);
+      else if (searching) enterWaiting = true;               // wait for Yahoo's answer
+      else enterPick();
+    }
+  });
+  box.addEventListener("mousedown", e => e.preventDefault());   // keep focus in the box
+  box.addEventListener("click", e => {
+    const opt = e.target.closest(".tpick-opt"); if (opt && !opt.classList.contains("dis")) pick(opt.dataset.sym);
+  });
+  input.addEventListener("blur", () => setTimeout(close, 120));
+}
+
+
+
+// ---- Legs (the portfolio being edited) ------------------------------------------------
+const BY_ID = Object.fromEntries(A.strategies.map(s => [s.id, s]));
+const COLORS = ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6"];
+const DRAFT = "quantlab.portfolio.draft", SAVED = "quantlab.portfolios";
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const EXAMPLE = [
+  { ticker: "GLD", tf: "1d", strategy: "SmaCrossover", settings: { fast: 25, slow: 150 }, weight: 50 },
+  { ticker: "SPY", tf: "1d", strategy: "RsiReversion", settings: { period: 2, buy_below: 10, sell_above: 70 }, weight: 50 },
+];
+function initialLegs() {
+  const q = new URLSearchParams(location.search).get("legs");
+  if (q) { try { const v = JSON.parse(q); if (Array.isArray(v) && v.length) return v; } catch (e) {} }
+  const d = store.get(DRAFT, null);
+  return Array.isArray(d) && d.length ? d : EXAMPLE;
+}
+let LEGS = initialLegs();
+let LAST = null;                                         // last results (for Equal risk)
+
+function settingInputs(i, strat, values) {
+  const P = Object.entries(strat?.params || {});
+  return P.map(([k, p]) => {
+    const v = values[k] ?? p.default;
+    const lab = `<span class="lbl" title="${esc(p.help || "")}">${esc(p.label || k)}</span>`;
+    if (p.type === "bool")
+      return `<label class="field">${lab}<select data-i="${i}" data-k="${esc(k)}"><option value="0"${v ? "" : " selected"}>No</option><option value="1"${v ? " selected" : ""}>Yes</option></select></label>`;
+    if (p.type === "choice")
+      return `<label class="field">${lab}<select data-i="${i}" data-k="${esc(k)}">` + p.choices.map(c => `<option${c === v ? " selected" : ""}>${esc(c)}</option>`).join("") + `</select></label>`;
+    return `<label class="field">${lab}<input type="number" data-i="${i}" data-k="${esc(k)}" value="${esc(v)}" step="any"` +
+      (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "") + `></label>`;
+  }).join("");
+}
+function drawLegs() {
+  const box = document.getElementById("legs");
+  box.innerHTML = LEGS.map((L, i) => {
+    const s = BY_ID[L.strategy] || A.strategies[0];
+    return `<div class="leg" style="--legc: var(${COLORS[i % COLORS.length]})">` +
+      `<span class="num">${i + 1}</span>` +
+      `<label class="field"><span>Ticker</span><input class="tk" data-i="${i}" value="${esc(L.ticker)}" maxlength="16" autocomplete="off" spellcheck="false"></label>` +
+      `<label class="field"><span>Timeframe</span><select class="tf" data-i="${i}">${A.timeframes.map(([v, l]) => `<option value="${v}"${v === L.tf ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>` +
+      `<label class="field strat"><span>Strategy</span><select class="st" data-i="${i}">${strategyOptions(A.strategies.filter(x => x.id !== "none"))}</select></label>` +
+      `<div class="settings">${settingInputs(i, s, L.settings || {})}</div>` +
+      `<label class="field"><span>Weight %</span><input class="weight" type="number" data-i="${i}" value="${esc(L.weight)}" min="0" max="1000" step="any"></label>` +
+      `<button type="button" class="rm" data-i="${i}" aria-label="Remove leg ${i + 1}">✕</button></div>`;
+  }).join("");
+  box.querySelectorAll("select.st").forEach(sel => { sel.value = LEGS[+sel.dataset.i].strategy; });
+  box.querySelectorAll("input.tk").forEach(inp => tickerPicker(inp, A.tickers, sym => { LEGS[+inp.dataset.i].ticker = sym; changed(); }));
+  changed(false);
+}
+function changed(save = true) {
+  const tot = LEGS.reduce((a, L) => a + (+L.weight || 0), 0);
+  document.getElementById("total").textContent = `Total weight ${Math.round(tot * 10) / 10}%` +
+    (tot > 100.5 ? " (leverage)" : tot < 99.5 ? " (rest in cash)" : "");
+  if (save) store.set(DRAFT, LEGS);
+}
+const legsBox = document.getElementById("legs");
+legsBox.addEventListener("input", e => {
+  const t = e.target, i = +t.dataset.i; if (Number.isNaN(i)) return;
+  if (t.classList.contains("tk")) LEGS[i].ticker = t.value.trim().toUpperCase();
+  else if (t.classList.contains("weight")) LEGS[i].weight = t.value === "" ? 0 : +t.value;
+  else if (t.dataset.k) LEGS[i].settings = { ...LEGS[i].settings, [t.dataset.k]: t.type === "number" ? (t.value === "" ? "" : +t.value) : t.value };
+  changed();
+});
+legsBox.addEventListener("change", e => {
+  const t = e.target, i = +t.dataset.i; if (Number.isNaN(i)) return;
+  if (t.classList.contains("tf")) { LEGS[i].tf = t.value; changed(); }
+  else if (t.classList.contains("st")) { LEGS[i].strategy = t.value; LEGS[i].settings = {}; drawLegs(); store.set(DRAFT, LEGS); }
+  else if (t.tagName === "SELECT" && t.dataset.k) {
+    const p = BY_ID[LEGS[i].strategy].params[t.dataset.k];
+    LEGS[i].settings = { ...LEGS[i].settings, [t.dataset.k]: p.type === "bool" ? t.value === "1" : t.value }; changed();
+  }
+});
+legsBox.addEventListener("click", e => {
+  const b = e.target.closest("button.rm"); if (!b) return;
+  LEGS.splice(+b.dataset.i, 1); drawLegs(); store.set(DRAFT, LEGS);
+});
+document.getElementById("addLeg").addEventListener("click", () => {
+  if (LEGS.length >= 12) return;
+  LEGS.push({ ticker: "SPY", tf: "1d", strategy: "SmaCrossover", settings: {}, weight: 0 }); drawLegs(); store.set(DRAFT, LEGS);
+});
+document.getElementById("eqW").addEventListener("click", () => {
+  const tot = LEGS.reduce((a, L) => a + (+L.weight || 0), 0) || 100;
+  LEGS.forEach(L => { L.weight = Math.round(tot / LEGS.length * 10) / 10; }); drawLegs(); store.set(DRAFT, LEGS);
+});
+document.getElementById("riskW").addEventListener("click", () => {
+  if (!LAST) return;
+  LEGS.forEach((L, i) => { if (LAST.equal_risk[i] !== undefined) L.weight = Math.round(LAST.equal_risk[i] * 1000) / 10; });
+  drawLegs(); store.set(DRAFT, LEGS);
+});
+
+// Other controls
+const histIn = document.getElementById("histIn");
+histIn.innerHTML = `<option value="">Default per timeframe</option>` + A.data.histories.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+costControls(document.getElementById("costsIn"), A.costs, null, null);
+function refreshSaved() {
+  const all = store.get(SAVED, {});
+  document.getElementById("loadIn").innerHTML = `<option value="">–</option>` + Object.keys(all).sort().map(n => `<option>${esc(n)}</option>`).join("");
+}
+refreshSaved();
+document.getElementById("saveBtn").addEventListener("click", () => {
+  const n = document.getElementById("saveName").value.trim(); if (!n) return document.getElementById("saveName").focus();
+  const all = store.get(SAVED, {}); all[n] = LEGS; store.set(SAVED, all); refreshSaved(); document.getElementById("loadIn").value = n;
+});
+document.getElementById("loadIn").addEventListener("change", e => {
+  const all = store.get(SAVED, {}); if (!all[e.target.value]) return;
+  LEGS = JSON.parse(JSON.stringify(all[e.target.value])); document.getElementById("saveName").value = e.target.value; drawLegs(); store.set(DRAFT, LEGS);
+});
+document.getElementById("delBtn").addEventListener("click", () => {
+  const n = document.getElementById("loadIn").value; if (!n) return;
+  const all = store.get(SAVED, {}); delete all[n]; store.set(SAVED, all); refreshSaved();
+});
+drawLegs();
+
+// ---- Run ------------------------------------------------------------------------------
+function query() {
+  const q = new URLSearchParams();
+  q.set("legs", JSON.stringify(LEGS.map(L => ({ ...L, ticker: (L.ticker || "").toUpperCase() }))));
+  if (histIn.value) q.set("hist", histIn.value);
+  const from = document.getElementById("fromIn").value; if (from) q.set("from", from);
+  const sel = document.querySelector(".costSel");
+  if (sel) { q.set("cost", sel.value); if (sel.value === "custom") document.querySelectorAll(".costFields input").forEach(i => q.set(i.name, i.value)); }
+  return q;
+}
+const runBtn = document.getElementById("runBtn"), notice = document.getElementById("notice");
+runBtn.addEventListener("click", async () => {
+  const q = query();
+  history.replaceState(null, "", "/portfolio?legs=" + encodeURIComponent(q.get("legs")));
+  runBtn.disabled = true; runBtn.textContent = "Running…"; notice.hidden = true;
+  try {
+    const r = await fetch("/api/portfolio?" + q), P = await r.json();
+    if (!r.ok) throw new Error(P.error || r.statusText);
+    LAST = P; document.getElementById("riskW").disabled = false;
+    draw(P);
+  } catch (err) { notice.textContent = "Couldn't run the portfolio: " + err.message; notice.hidden = false; }
+  runBtn.disabled = false; runBtn.textContent = "Run portfolio";
+});
+
+const pct = v => v === null || v === undefined ? "–" : (v * 100).toFixed(1) + "%";
+const num = v => v === null || v === undefined ? "–" : v.toFixed(2);
+let eqChart = null;
+function draw(P) {
+  document.getElementById("results").hidden = false;
+  if (P.errors.length) {
+    notice.innerHTML = `<b>Left out:</b> ` + P.errors.map(e => `leg ${e.leg + 1} (${esc(e.label)}): ${esc(e.error)}`).join("; ");
+    notice.hidden = false;
+  }
+  const S = P.portfolio, B = P.benchmark, legs = P.legs;
+  const bestLeg = [...legs].sort((a, b) => b.sharpe - a.sharpe)[0];
+  const smoother = S.sharpe > bestLeg.sharpe;
+  const v = document.getElementById("verdict");
+  v.classList.remove("good", "weak", "bad");
+  v.classList.add(S.sharpe >= Math.max(bestLeg.sharpe, B.sharpe) ? "good" : S.sharpe >= P.avg_leg_sharpe ? "weak" : "bad");
+  const head = legs.length < 2 ? "One leg: add more to see diversification"
+    : smoother ? `Diversification works: the whole (Sharpe ${num(S.sharpe)}) beats every single leg (best ${num(bestLeg.sharpe)})`
+    : S.sharpe > P.avg_leg_sharpe ? `Smoother than the average leg (Sharpe ${num(S.sharpe)} vs ${num(P.avg_leg_sharpe)}), but not better than the best one`
+    : `The mix doesn't help: Sharpe ${num(S.sharpe)}, below the average leg (${num(P.avg_leg_sharpe)})`;
+  v.innerHTML = `<h2>${esc(head)}</h2>
+    <p>${P.start} → ${P.end} (${P.days.toLocaleString()} trading days that every leg covers). Total weight ${Math.round(P.total_weight * 100)}%.
+    ${P.avg_corr !== null ? `Average correlation between legs: <b>${P.avg_corr.toFixed(2)}</b>${P.avg_corr < 0.3 ? " (low: good for diversification)" : P.avg_corr > 0.7 ? " (high: they mostly move together)" : ""}.` : ""}
+    ${B.sharpe > S.sharpe ? ` <b>But simply holding the same tickers with the same weights did better</b> (Sharpe ${num(B.sharpe)}): here the strategies add safety (smaller drawdowns), not return per unit of risk.` : ` It also beats simply holding the same tickers with the same weights (Sharpe ${num(B.sharpe)}).`}</p>
+    <div class="kpis">
+      <div class="kpi"><span>Return / year</span><b>${pct(S.cagr)}</b></div>
+      <div class="kpi"><span>Sharpe</span><b>${num(S.sharpe)}</b></div>
+      <div class="kpi"><span>Worst drawdown</span><b>${pct(S.max_dd)}</b></div>
+      <div class="kpi"><span>Return / yr at 5% drawdown</span><b>${pct(S.prop)}</b></div>
+      <div class="kpi"><span>Buy & hold, same weights: Sharpe</span><b>${num(B.sharpe)}</b></div>
+    </div>`;
+  // Stats table
+  const row = (cls, label, x, w) => `<tr class="${cls}"><td class="l">${label}</td><td>${w}</td><td class="${x.cagr >= 0 ? "pos" : "neg"}">${pct(x.cagr)}</td><td>${pct(x.vol)}</td>` +
+    `<td>${num(x.sharpe)}</td><td class="neg">${pct(x.max_dd)}</td><td>${pct(x.worst_day)}</td><td>${pct(x.prop)}</td></tr>`;
+  document.getElementById("statsTable").innerHTML = `<thead><tr><th class="l">Leg</th><th>Weight</th><th>Return / yr</th><th>Volatility</th><th>Sharpe</th><th>Worst drawdown</th><th>Worst day</th><th>Return / yr at 5% drawdown</th></tr></thead><tbody>` +
+    legs.map(L => row("", `<i class="sw" style="background:${css(COLORS[L.leg % COLORS.length])}"></i>${L.leg + 1}. ${esc(L.label)}`, L, Math.round(L.weight * 1000) / 10 + "%")).join("") +
+    row("port", "Portfolio", S, Math.round(P.total_weight * 1000) / 10 + "%") + row("bench", "Buy & hold of the same tickers, same weights", B, "") + `</tbody>`;
+  // Correlation
+  const C = P.corr, name = i => `${i + 1}. ${esc(LEGS[i]?.ticker || "")} ${esc(LEGS[i]?.tf || "")}`;
+  const shade = x => x >= 0 ? `color-mix(in srgb, ${css("--down")} ${Math.round(Math.abs(x) * 55)}%, transparent)` : `color-mix(in srgb, ${css("--up")} ${Math.round(Math.abs(x) * 55)}%, transparent)`;
+  document.getElementById("corrTable").innerHTML = `<thead><tr><th class="l"></th>${C.legs.map(i => `<th>${name(i)}</th>`).join("")}</tr></thead><tbody>` +
+    C.values.map((rowv, a) => `<tr><td class="l">${name(C.legs[a])}</td>${rowv.map((x, b) => `<td class="cell" style="background:${a === b ? "transparent" : shade(x)}">${a === b ? "–" : x.toFixed(2)}</td>`).join("")}</tr>`).join("") + `</tbody>`;
+  document.getElementById("corrNote").textContent = `Red: they tend to rise and fall together (less protection). Green: they tend to move opposite (they hedge each other). Near 0: unrelated, which is what makes a portfolio smoother.`;
+  // Chart
+  const LW = window.LightweightCharts;
+  if (eqChart) { eqChart.remove(); eqChart = null; }
+  eqChart = LW.createChart(document.getElementById("eqChart"), { autoSize: true, layout: { fontFamily: css("--mono"), fontSize: 11 },
+    rightPriceScale: { borderVisible: false, mode: LW.PriceScaleMode.Logarithmic }, timeScale: { borderVisible: false, minBarSpacing: 0.02 },
+    crosshair: { mode: LW.CrosshairMode.Normal } });
+  const money = v => "$" + (v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e4 ? (v / 1e3).toFixed(1) + "K" : Math.round(v).toLocaleString());
+  const line = (data, color, width, style) => { const s = eqChart.addSeries(LW.LineSeries, { color, lineWidth: width, lineStyle: style ?? 0,
+    priceLineVisible: false, lastValueVisible: false, priceFormat: { type: "custom", formatter: money } }); s.setData(data); return s; };
+  const series = [];
+  legs.forEach(L => series.push(["leg", L.leg, line(P.curves.legs[String(L.leg)], css(COLORS[L.leg % COLORS.length]), 1, 0)]));
+  series.push(["bench", -1, line(P.curves.benchmark, css("--muted"), 1, 2)]);
+  series.push(["port", -2, line(P.curves.portfolio, css("--fg"), 3, 0)]);
+  const paint = () => eqChart.applyOptions({ layout: { background: { type: "solid", color: css("--panel") }, textColor: css("--muted") },
+    grid: { vertLines: { color: css("--grid") }, horzLines: { color: css("--grid") } } });
+  paint();
+  eqChart.timeScale().fitContent();
+  const lg = document.getElementById("legend"), idx = new Map(P.curves.portfolio.map((p, i) => [p.time, i]));
+  const showAt = i => {
+    const sw = c => `<i class="sw" style="background:${c}"></i>`;
+    lg.innerHTML = `<span><b>${P.curves.portfolio[i].time}</b></span><span>${sw(css("--fg"))}Portfolio <b>${money(P.curves.portfolio[i].value)}</b></span>` +
+      `<span>${sw(css("--muted"))}Buy & hold <b>${money(P.curves.benchmark[i].value)}</b></span>` +
+      legs.map(L => `<span>${sw(css(COLORS[L.leg % COLORS.length]))}${L.leg + 1} <b>${money(P.curves.legs[String(L.leg)][i].value)}</b></span>`).join("");
+  };
+  showAt(P.curves.portfolio.length - 1);
+  eqChart.subscribeCrosshairMove(p => {
+    const key = p.time ? (typeof p.time === "string" ? p.time : `${p.time.year}-${String(p.time.month).padStart(2, "0")}-${String(p.time.day).padStart(2, "0")}`) : null;
+    showAt(key && idx.has(key) ? idx.get(key) : P.curves.portfolio.length - 1);
+  });
+  document.getElementById("chartNote").textContent = "log scale · thick: portfolio · thin: each leg alone at 100% · dashed: buy & hold";
+  document.getElementById("propTableWrap").hidden = true;
+  document.getElementById("propVerdict").innerHTML = `Pick the rules and press <b>Run check</b>.`;
+  document.getElementById("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---- Prop firm check on the combined account -------------------------------------------
+(() => {
+  const PRESETS = { two_step: "Two-step: +10% then +5%, 10% max loss, 5% daily", one_step: "One-step: +10%, 6% trailing loss, 3% daily",
+                    strict: "Strict two-step: +8% then +5%, 8% max loss, 4% daily", custom: "Custom…" };
+  const FIELDS = [["p_target", "Target %", 10], ["p_target2", "Phase 2 target %", 5], ["p_maxloss", "Max loss %", 10], ["p_daily", "Daily loss %", 5], ["p_days", "Days per phase (0 = none)", 0]];
+  const el = document.getElementById("propRules");
+  el.innerHTML = `<label class="field"><span>Challenge rules</span><select id="propPreset">` + Object.entries(PRESETS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("") + `</select></label>` +
+    FIELDS.map(([k, l, d]) => `<label class="field pf" hidden><span>${esc(l)}</span><input type="number" id="${k}" value="${d}" step="any" min="0"></label>`).join("") +
+    `<label class="field pf" hidden><span>Max loss trails</span><select id="p_trailing"><option value="0">No</option><option value="1">Yes</option></select></label>` +
+    `<button type="button" class="run" id="propRun">Run check</button>`;
+  const preset = document.getElementById("propPreset");
+  try { preset.value = localStorage.getItem("quantlab.propPreset") || "two_step"; } catch (e) {}
+  const show = () => el.querySelectorAll(".pf").forEach(f => { f.hidden = preset.value !== "custom"; });
+  preset.addEventListener("change", () => { show(); try { localStorage.setItem("quantlab.propPreset", preset.value); } catch (e) {} }); show();
+  const btn = document.getElementById("propRun"), verdict = document.getElementById("propVerdict");
+  btn.addEventListener("click", async () => {
+    const q = query(); q.set("prop", preset.value);
+    if (preset.value === "custom") { FIELDS.forEach(([k]) => q.set(k, document.getElementById(k).value)); q.set("p_trailing", document.getElementById("p_trailing").value); }
+    btn.disabled = true; btn.textContent = "Simulating…";
+    try {
+      const r = await fetch("/api/portfolio/prop?" + q), P = await r.json();
+      if (!r.ok) throw new Error(P.error || r.statusText);
+      const rows = P.rows, safe = rows.find(x => x.size === P.safe), best = [...rows].sort((a, b) => b.pass - a.pass)[0];
+      const Bm = Object.fromEntries(P.benchmark.map(b => [b.size, b]));
+      const p0 = v => v === null || v === undefined ? "–" : Math.round(v * 100) + "%";
+      verdict.innerHTML = (safe ? `<b>Safe size: ${safe.size}×</b> (past worst drawdown ${pct(safe.hist_dd)}, worst day ${pct(safe.hist_worst_day)}: at most half the limits). ` +
+        `Passes in <b>${p0(safe.pass)}</b> of simulated futures` + (safe.months !== null ? ` (median ${safe.months.toFixed(1)} months)` : "") + `, fails in ${p0(safe.fail)}; funded account survives a year in ${p0(safe.funded_survive)}. ` +
+        (safe.open >= 0.5 ? `<b>Too slow at that size:</b> about ${pct(safe.cagr)} a year. ` : "")
+        : `<b>No safe size</b> within the limits. `) + `Highest pass rate: ${p0(best.pass)} at ${best.size}×.`;
+      document.getElementById("propTable").innerHTML = `<thead><tr><th>Size</th><th>Pass</th><th>Fail</th><th>Not finished</th><th>Median time to pass</th><th>Funded: survives 1 yr</th><th>Past worst drawdown</th><th>Past worst day</th><th>Return / yr</th><th>Buy &amp; hold: pass</th></tr></thead><tbody>` +
+        rows.map(x => `<tr class="${x.size === P.safe ? "safe" : ""}"><td>${x.size}×</td><td class="${x.pass >= .5 ? "good" : ""}">${p0(x.pass)}</td><td class="${x.fail >= .3 ? "bad" : ""}">${p0(x.fail)}</td><td>${p0(x.open)}</td>` +
+          `<td>${x.months === null ? "–" : x.months.toFixed(1) + " mo"}</td><td class="${x.funded_survive < .7 ? "bad" : ""}">${p0(x.funded_survive)}</td>` +
+          `<td class="${-x.hist_dd > P.rules.max_loss ? "bad" : ""}">${pct(x.hist_dd)}</td><td class="${-x.hist_worst_day > P.rules.daily_loss ? "bad" : ""}">${pct(x.hist_worst_day)}</td><td>${pct(x.cagr)}</td><td>${p0(Bm[x.size]?.pass)}</td></tr>`).join("") + `</tbody>`;
+      document.getElementById("propTableWrap").hidden = false;
+      document.getElementById("propNote").textContent = `Rules: ${P.describe}. ${P.sims.toLocaleString()} simulated futures per size from ${P.block}-day blocks of ${P.from} → ${P.to}. Size 2× = all weights doubled.`;
+    } catch (err) { verdict.textContent = "Check failed: " + err.message; }
+    btn.disabled = false; btn.textContent = "Run check";
+  });
+})();
+</script>

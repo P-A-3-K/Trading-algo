@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import numpy as np
@@ -202,3 +203,20 @@ def test_sweep_over_a_choice_setting(server):
     assert '"trend_tf":"1d"' in body and '"trend_tf":"off"' in body
     status, body = get(server + "/optimize?ticker=TEST&strategy=FairValueGap&trend_tf_values=2h&run=1")
     assert status == 400 and "one of" in body
+
+
+def test_portfolio_routes(server):
+    legs = [{"ticker": "TEST", "tf": "1d", "strategy": "SmaCrossover", "settings": {"fast": 10, "slow": 30}, "weight": 60},
+            {"ticker": "TEST", "tf": "1d", "strategy": "RsiReversion", "settings": {}, "weight": 40}]
+    q = urllib.parse.urlencode({"legs": json.dumps(legs)})
+    status, body = get(server + "/api/portfolio?" + q)
+    assert status == 200, body[:300]
+    d = json.loads(body)
+    assert d["total_weight"] == pytest.approx(1.0) and len(d["legs"]) == 2 and len(d["curves"]["portfolio"]) > 100
+    status, body = get(server + "/api/portfolio/prop?" + q)
+    assert status == 200 and json.loads(body)["rows"]
+    assert get(server + "/portfolio")[0] == 200
+    bad = urllib.parse.urlencode({"legs": json.dumps([{**legs[0], "settings": {"fast": 50, "slow": 10}}])})
+    status, body = get(server + "/api/portfolio?" + bad)
+    assert status == 400 and "Leg 1" in json.loads(body)["error"]
+    assert get(server + "/api/portfolio?legs=notjson")[0] == 400

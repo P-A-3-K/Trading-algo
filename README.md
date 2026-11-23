@@ -26,6 +26,10 @@ one-step trailing, or your own) and it plays them on thousands of simulated futu
 strategy's own results, at several position sizes: pass and fail odds, time to pass, how long a
 funded account survives, and the largest "safe" size. On the Optimize page, rank by
 **Return / yr at 5% drawdown** to look for strategies that suit prop accounts.
+**Portfolio:** combine several strategies in one account on the **Portfolio** page (or "＋ Portfolio"
+on the chart page): each leg is a ticker + timeframe + strategy + weight. You get the combined growth,
+each leg vs the whole, how the legs move together (correlation), and the Prop firm check on the
+combined account. Weights can be equal, equal-risk, or anything (over 100% = leverage).
 **Multi-timeframe:** strategies can read a higher timeframe's candles (only finished ones, so no
 peeking). Try **MTF RSI** (buy short-term dips while the 4h RSI shows an up-trend) or FVG's
 **Trend filter timeframe**; on the Optimize page, tick several timeframes to test which works.
@@ -71,6 +75,7 @@ pytest -q
 | `quantlab/scan.py` | Market scan: the same sweep on many tickers × timeframes; settings picked in-sample per market, compared out-of-sample; settings ranked across all markets |
 | `quantlab/alpaca.py` | Alpaca market data: years of 5m candles, saved and updated incrementally; keys kept in `alpaca_keys.json` (git-ignored) |
 | `quantlab/prop.py` | Prop firm check: challenge rules (target, max/trailing loss, daily loss) played on block-bootstrapped futures at many position sizes; safe size |
+| `quantlab/portfolio.py` | Several strategies in one account: legs combined daily by weight over their common period; correlation, equal-risk weights; prop check on the whole |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |

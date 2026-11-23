@@ -23,7 +23,10 @@ def parse_chart(payload: dict) -> pd.DataFrame:
     chart = payload["chart"]
     if chart.get("error"):
         raise ValueError(f"Yahoo error: {chart['error']}")
-    result = chart["result"][0]
+    result = (chart.get("result") or [{}])[0]
+    if not result.get("timestamp"):                 # a symbol Yahoo knows of but has no prices for
+        symbol = (result.get("meta") or {}).get("symbol", "this ticker")
+        raise ValueError(f"Yahoo Finance has no price history for {symbol!r}. Check the symbol.")
     quote = result["indicators"]["quote"][0]
     dates = [datetime.fromtimestamp(t, timezone.utc).date() for t in result["timestamp"]]
     df = pd.DataFrame({
@@ -166,7 +169,9 @@ def parse_intraday(payload: dict) -> pd.DataFrame:
     chart = payload["chart"]
     if chart.get("error"):
         raise ValueError(f"Yahoo error: {chart['error'].get('description', chart['error'])}")
-    result = chart["result"][0]
+    result = (chart.get("result") or [{}])[0]
+    if not result.get("timestamp"):
+        raise ValueError(f"Yahoo Finance has no intraday prices for {(result.get('meta') or {}).get('symbol', 'this ticker')!r}.")
     quote = result["indicators"]["quote"][0]
     idx = pd.to_datetime(result["timestamp"], unit="s", utc=True).tz_convert(EXCHANGE_TZ)
     df = pd.DataFrame({"Open": quote["open"], "High": quote["high"], "Low": quote["low"],

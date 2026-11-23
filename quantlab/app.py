@@ -13,6 +13,7 @@ Pages and data it serves:
     /optimize?ticker=SPY&strategy=SmaCrossover   parameter sweep: one split, walk-forward,
                                         or mode=scan&tickers=SPY,QQQ&tfs=1d,1h (many markets)
     /api/prop?<chart address>&prop=two_step   prop firm challenge odds at several sizes
+    /portfolio                          several strategies in one account (legs=[...] in the address)
     /settings                           Data page: where candles come from; Alpaca keys
     /api/scan/start, /api/scan/status?id=, /api/scan/cancel?id=   a market scan runs in the
                                         background; the page polls for progress
@@ -282,6 +283,58 @@ def prop_payload(query: dict) -> dict:
     return out
 
 
+def legs_of(query: dict) -> list:
+    """Portfolio legs from the address: legs=[{"ticker","tf","strategy","settings","weight" (in %)}]."""
+    from .portfolio import Leg
+    try:
+        raw = json.loads(query.get("legs") or "[]")
+    except ValueError:
+        raise ValueError("The portfolio in the address is damaged (legs isn't valid JSON).")
+    legs = []
+    for i, x in enumerate(raw if isinstance(raw, list) else []):
+        try:
+            ticker = dl.clean_ticker(str(x.get("ticker", "")))
+            tf = dl.check_timeframe(str(x.get("tf") or "1d"))
+            cls = strategies.get(str(x.get("strategy") or ""))
+            settings = {k: v for k, v in (x.get("settings") or {}).items() if k in cls.all_params() and v != ""}
+            cls(**settings)                                   # check the settings now
+            weight = float(x.get("weight", 0)) / 100
+        except (ValueError, TypeError, AttributeError) as e:
+            raise ValueError(f"Leg {i + 1}: {e}")
+        legs.append(Leg(ticker, tf, cls.__name__, settings, weight))
+    return legs
+
+
+def portfolio_payload(query: dict) -> dict:
+    """The combined backtest of every leg, as plain data for the page."""
+    from . import portfolio as pf
+    res = pf.run(legs_of(query), history=query.get("hist") or None, costs=costs_of(query)[1],
+                 start=query.get("from") or None)
+    curve = lambda r: [{"time": str(d.date()), "value": round(float(v), 2)}
+                       for d, v in zip(r.index, chart.START_CAPITAL * (1 + r).cumprod())]
+    out = {k: v for k, v in res.items() if k not in ("returns", "low", "bench_returns", "leg_returns")}
+    out["curves"] = {"portfolio": curve(res["returns"]), "benchmark": curve(res["bench_returns"]),
+                     "legs": {str(i): curve(res["leg_returns"][i]) for i in res["leg_returns"].columns}}
+    clean_all = lambda d: {k: (clean_all(v) if isinstance(v, dict) else clean(v) if isinstance(v, float) else v)
+                           for k, v in d.items()}
+    out["portfolio"], out["benchmark"] = clean_all(out["portfolio"]), clean_all(out["benchmark"])
+    out["legs"] = [clean_all(x) for x in out["legs"]]
+    return out
+
+
+def portfolio_prop_payload(query: dict) -> dict:
+    from . import portfolio as pf
+    from . import prop
+    res = pf.run(legs_of(query), history=query.get("hist") or None, costs=costs_of(query)[1],
+                 start=query.get("from") or None)
+    rules = prop_rules_of(query)
+    out = prop.check(pf.prop_source(res), rules)
+    out["benchmark"] = prop.check(prop.DailyResults(res["bench_returns"], res["bench_returns"].clip(upper=0)),
+                                  rules, sizes=[r["size"] for r in out["rows"]])["rows"]
+    out["period"], out["from"], out["to"] = "all", res["start"], res["end"]
+    return out
+
+
 def settings_payload(local: bool, message: str = "", error: bool = False, key_id: str = "") -> dict:
     from . import alpaca
     keys = alpaca.load_keys()
@@ -529,6 +582,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/scan/cancel": self.api_scan_cancel,
                   "/settings": self.settings_page, "/api/prop": self.api_prop,
                   "/api/estimate": self.api_estimate,
+                  "/portfolio": self.portfolio_page, "/api/portfolio": self.api_portfolio,
+                  "/api/portfolio/prop": self.api_portfolio_prop,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
         if handler is None:
@@ -630,6 +685,23 @@ class Handler(BaseHTTPRequestHandler):
         seen = {r["symbol"] for r in local}
         self.send_json({"query": q, "local": local,
                         "remote": [r for r in remote if r["symbol"] not in seen], "error": error})
+
+    def portfolio_page(self, query):
+        payload = {"strategies": strategies_info(), "errors": strategy_errors(),
+                   "timeframes": TIMEFRAME_MENU, "data": data_info(),
+                   "costs": cost_menu(*costs_of(query)),
+                   "tickers": universe.menu(dl.cached_tickers())}
+        library = (chart.WEB / "vendor" / "lightweight-charts.standalone.production.js").read_text(encoding="utf-8")
+        page = (chart.WEB / "portfolio.html").read_text(encoding="utf-8").replace(
+            "/*__DATA__*/null", json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+        ).replace("/*__LIBRARY__*/", library)
+        self.send(HTTPStatus.OK, chart.PAGE.format(body=page), "text/html; charset=utf-8")
+
+    def api_portfolio(self, query):
+        self.send_json(portfolio_payload(query))
+
+    def api_portfolio_prop(self, query):
+        self.send_json(portfolio_prop_payload(query))
 
     def api_estimate(self, query):
         self.send_json(estimate_payload(query))
