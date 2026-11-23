@@ -334,6 +334,15 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const A = DATA.app, S = A.strategies.find(s => s.id === A.strategy) || A.strategies[0];
 const params = Object.entries(S.params);
 const SCAN = { tickers: [...A.scan.tickers], tfs: [...A.scan.tfs] };
+let SPEED = null;               // seconds per combination per market, by timeframe (measured)
+async function loadSpeed() {
+  try {
+    const q = new URLSearchParams({ strategy: A.strategy, tfs: A.timeframes.map(t => t[0]).join(",") });
+    const h = document.getElementById("histIn")?.value; if (h) q.set("hist", h);
+    SPEED = (await (await fetch("/api/estimate?" + q)).json()).per_combo;
+    if (typeof countCombos === "function") countCombos();
+  } catch (e) { SPEED = null; }
+}
 let scanJob = null;
 
 
@@ -562,7 +571,7 @@ histIn.innerHTML = `<option value="">Default (${DATA.intraday ? esc(HIST_LABEL[A
 histIn.value = A.history_explicit;
 const histQuery = () => histIn.value ? `&hist=${histIn.value}` : "";
 histIn.addEventListener("change", () => {
-  if (document.getElementById("modeIn").value === "scan") return;      // used when the scan runs
+  if (document.getElementById("modeIn").value === "scan") { loadSpeed(); return; }   // used when the scan runs
   location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + histQuery() + costQuery(A.costs);
 });
 tfIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${tfIn.value}&strategy=${sIn.value}` + costQuery(A.costs); });
@@ -656,12 +665,16 @@ function countCombos() {
           s = +document.querySelector(`[name="${k}_step"]`).value;
     n *= s > 0 && t >= f ? Math.floor((t - f) / s + 1e-9) + 1 : 0;
   }
-  countEl.textContent = `${n.toLocaleString()} combinations` + (modeIn.value === "wf" ? " per window" : "");
+  const one = SPEED && SPEED[TF] ? n * SPEED[TF] * (modeIn.value === "wf" ? 1 : 1) : null;
+  countEl.textContent = `${n.toLocaleString()} combinations` + (modeIn.value === "wf" ? " per window" : "") +
+    (one !== null && modeIn.value !== "scan" ? ` · about ${one < 90 ? Math.max(1, Math.round(one)) + " s" : Math.round(one / 60) + " min"}` : "");
   countEl.classList.toggle("too-many", n > A.max_combos);
   if (n > A.max_combos) countEl.textContent += ` (max ${A.max_combos.toLocaleString()})`;
   if (modeIn.value === "scan") {
     const m = SCAN.tickers.length * SCAN.tfs.length, total = n * m;
-    const secs = total * 0.004 + m * 0.5;               // rough: ~4 ms per backtest, plus loading
+    // measured speed of this strategy (per timeframe); until it arrives, ~4 ms per backtest
+    const secs = SPEED ? n * SCAN.tfs.reduce((a, tf) => a + (SPEED[tf] || 0.004) * SCAN.tickers.length, 0) + m * 0.5
+                       : total * 0.004 + m * 0.5;
     const bad = n > A.max_combos || m > A.scan.max_markets || total > A.scan.max_backtests || m === 0;
     countEl.textContent = `${n.toLocaleString()} combinations × ${m} market${m === 1 ? "" : "s"} = ${total.toLocaleString()} backtests` +
       (m === 0 ? " (pick a ticker and a timeframe)" : m > A.scan.max_markets ? ` (max ${A.scan.max_markets} markets)`
@@ -761,7 +774,10 @@ async function startScan() {
       if (st.error && !st.state) throw new Error(st.error);
       const f = st.total ? st.done / st.total : 0;
       bar.style.width = (f * 100).toFixed(1) + "%"; pct.textContent = Math.floor(f * 100) + "%";
-      what.textContent = `${st.label} · ${st.done.toLocaleString()} of ${st.total.toLocaleString()} backtests · ${Math.round(st.elapsed)} s`;
+      const left = st.done > 0 && f > 0.03 ? st.elapsed / f * (1 - f) : null;
+      const mins = s => s < 90 ? Math.round(s) + " s" : Math.round(s / 60) + " min";
+      what.textContent = `${st.label} · ${st.done.toLocaleString()} of ${st.total.toLocaleString()} backtests · ${mins(st.elapsed)}` +
+        (left !== null ? ` · about ${mins(left)} left` : "");
       if (st.state === "done") {
         finish();
         try { drawScan(st.result); prog.hidden = true; }
@@ -778,6 +794,7 @@ document.getElementById("scanCancel").addEventListener("click", () => {
   if (scanJob) fetch(`/api/scan/cancel?id=${scanJob}`);
 });
 drawChips();
+loadSpeed();
 
 // ---- Many markets: results ---------------------------------------------------------
 function mixHex(a, b, t) {

@@ -99,13 +99,18 @@ def held_positions(index: pd.DatetimeIndex, trades: list) -> pd.Series:
     A trade entered on day d (e.g. at the open) is held at d's close; on its exit
     day it is no longer held at the close.
     """
-    held = pd.Series(0.0, index=index)
-    for t in trades:
-        mask = index >= t.entry_date
-        if t.exit_date is not None:
-            mask &= index < t.exit_date
-        held[mask] = t.side * t.size
-    return held
+    held = np.zeros(len(index))
+    if trades:
+        # Where every trade starts and ends, found for all trades at once (binary search)
+        starts = index.searchsorted(pd.DatetimeIndex([t.entry_date for t in trades]), side="left")
+        ends = [len(index) if t.exit_date is None else None for t in trades]
+        exits = [t.exit_date for t in trades if t.exit_date is not None]
+        if exits:
+            found = iter(index.searchsorted(pd.DatetimeIndex(exits), side="left"))
+            ends = [e if e is not None else next(found) for e in ends]
+        for t, s, e in zip(trades, starts, ends):     # later trades win where they overlap
+            held[s:e] = t.side * t.size
+    return pd.Series(held, index=index)
 
 
 def simulate_trades(bars: pd.DataFrame, trades: list, cost_bps: float = 5.0,

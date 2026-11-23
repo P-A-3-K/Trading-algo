@@ -80,13 +80,27 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
     def compute(self, bars):
         o, h, l, c = (bars[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
         dates, n, N = bars.index, len(bars), self.swing
+        rr, risk_pct, expiry = self.rr, self.risk_pct, self.expiry
+
+        # Swings, worked out for every bar at once. A swing low at bar k (lower than the
+        # N bars on each side) is only KNOWN at bar k + N, so it's used from then on.
+        low_s, high_s = pd.Series(l), pd.Series(h)
+        is_swing_low = ((low_s < low_s.rolling(N).min().shift(1)) &
+                        (low_s < low_s.rolling(N).min().shift(-N))).to_numpy().copy()
+        is_swing_high = ((high_s > high_s.rolling(N).max().shift(1)) &
+                         (high_s > high_s.rolling(N).max().shift(-N))).to_numpy().copy()
+        is_swing_low[:N] = is_swing_high[:N] = False
+
+        # Plain Python lists: much faster than numpy for one-value-at-a-time loops
+        o, h, l, c = o.tolist(), h.tolist(), l.tolist(), c.tolist()
+        is_swing_low, is_swing_high = is_swing_low.tolist(), is_swing_high.tolist()
+        may_enter, may_hold = (m.tolist() for m in self.session_masks(bars))  # all True unless day trading
 
         swing_lows, swing_highs = [], []      # (bar index, price), confirmed so far
         pending = []                           # untouched FVGs
         signal = None                          # FVG touched today -> enter at next open
         trade = None                           # the open trade, if any
-        zone_top, zone_bot, stop_line, target_line = (np.full(n, np.nan) for _ in range(4))
-        may_enter, may_hold = self.session_masks(bars)   # all True unless day trading
+        zone_top, zone_bot, stop_line, target_line = ([np.nan] * n for _ in range(4))
 
         for t in range(n):
             # 1. Enter at today's open if yesterday touched an FVG
@@ -95,9 +109,9 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
                 f, entry = signal, o[t]
                 if (entry - f["stop"]) * f["side"] > 0:          # open still on the right side of the stop
                     risk = abs(entry - f["stop"])
-                    size = min(1.0, self.risk_pct / 100 / (risk / entry))
-                    trade = {"side": f["side"], "entry": entry, "date": dates[t], "size": size,
-                             "stop": f["stop"], "target": entry + f["side"] * self.rr * risk}
+                    size = min(1.0, risk_pct / 100 / (risk / entry))
+                    trade = {"side": f["side"], "entry": entry, "t": t, "size": size,
+                             "stop": f["stop"], "target": entry + f["side"] * rr * risk}
                     entered_today = True
             signal = None
 
@@ -126,27 +140,28 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
                 if exit_price is None and not may_hold[t]:       # day trading: flat at the close
                     exit_price, reason = c[t], "end of day"
                 if exit_price is not None:
-                    self.trade(trade["date"], trade["entry"], side, trade["size"], dates[t],
+                    self.trade(dates[trade["t"]], trade["entry"], side, trade["size"], dates[t],
                                exit_price, stop, target, reason)
                     trade = None
 
             # 3. First touches of pending FVGs (made on earlier days)
-            still = []
-            for f in pending:
-                touched = l[t] <= f["top"] if f["side"] > 0 else h[t] >= f["bottom"]
-                if touched:
-                    if trade is None and signal is None:
-                        signal = f                    # newest touched first (see sort below)
-                elif t - f["made"] <= self.expiry:
-                    still.append(f)
-            pending = still
+            if pending:
+                still = []
+                for f in pending:
+                    touched = l[t] <= f["top"] if f["side"] > 0 else h[t] >= f["bottom"]
+                    if touched:
+                        if trade is None and signal is None:
+                            signal = f                    # newest touched first (see sort below)
+                    elif t - f["made"] <= expiry:
+                        still.append(f)
+                pending = still
 
             # 4. Swings confirmed today (the bar N days ago, compared with N bars each side)
             k = t - N
-            if k - N >= 0:
-                if l[k] < l[k - N:k].min() and l[k] < l[k + 1:t + 1].min():
+            if k >= N:
+                if is_swing_low[k]:
                     swing_lows.append((k, l[k]))
-                if h[k] > h[k - N:k].max() and h[k] > h[k + 1:t + 1].max():
+                if is_swing_high[k]:
                     swing_highs.append((k, h[k]))
 
             # 5. New FVG completed today (today = candle 3)
@@ -169,7 +184,7 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
                 stop_line[t], target_line[t] = trade["stop"], trade["target"]
 
         if trade is not None:                                          # still open at the end
-            self.trade(trade["date"], trade["entry"], trade["side"], trade["size"],
+            self.trade(dates[trade["t"]], trade["entry"], trade["side"], trade["size"],
                        stop=trade["stop"], target=trade["target"])
 
         # Lines: the newest untouched FVG zone, and the open trade's stop / take-profit

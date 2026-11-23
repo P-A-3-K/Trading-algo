@@ -158,6 +158,60 @@ def history_of(query: dict, tf: str, page: str = "chart"):
     return (CHART_HISTORY if page == "chart" else SWEEP_HISTORY)[tf]
 
 
+BARS_PER_DAY = {"5m": 192, "15m": 64, "30m": 32, "1h": 16, "4h": 4, "1d": 1}
+_SPEED = {}                                  # strategy id -> (file time, seconds per bar)
+
+
+def seconds_per_bar(cls) -> float:
+    """Time one backtest of the strategy (default settings) on 20,000 test bars."""
+    import inspect, os
+    import numpy as np
+    from .backtest import simulate
+    try:
+        stamp = os.path.getmtime(inspect.getfile(cls))
+    except (TypeError, OSError):
+        stamp = 0
+    hit = _SPEED.get(cls.__name__)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    n = 20_000
+    rng = np.random.default_rng(0)
+    idx = pd.date_range("2024-01-02 04:00", periods=n, freq="15min", tz="America/New_York")
+    c = 100 * np.exp(np.cumsum(rng.normal(0, 0.002, n)))
+    o = np.r_[c[0], c[:-1]]
+    bars = pd.DataFrame({"open": o, "high": np.maximum(o, c) * 1.001, "low": np.minimum(o, c) * 0.999,
+                         "close": c, "volume": 1000.0}, index=idx)
+    t0 = time.perf_counter()
+    try:
+        simulate(bars, cls().run(bars))
+    except Exception:                       # a strategy that can't run on test data: assume slow
+        return 5e-5
+    per_bar = (time.perf_counter() - t0) / n
+    _SPEED[cls.__name__] = (stamp, per_bar)
+    return per_bar
+
+
+def estimate_bars(tf: str, hist) -> int:
+    """Roughly how many candles one market has at this timeframe and history."""
+    from . import alpaca
+    if tf == "1d":
+        return 252 * 20
+    days = dl.HISTORY.get(hist) or 3650
+    if not alpaca.enabled():                 # Yahoo keeps 60 days (5m-30m) or 2 years (1h, 4h)
+        days = min(days, 60 if tf in ("5m", "15m", "30m") else 730)
+    days = min(days, 3650)                   # Alpaca: since 2016
+    return int(days * 252 / 365 * BARS_PER_DAY[tf])
+
+
+def estimate_payload(query: dict) -> dict:
+    """Seconds per combination for one market at each timeframe (for the 'about N s' line)."""
+    cls = strategies.get(query.get("strategy") or DEFAULT_STRATEGY)
+    per_bar = seconds_per_bar(cls)
+    tfs = [t for t in (query.get("tfs") or "").split(",") if t in dl.TIMEFRAMES] or list(dl.TIMEFRAMES)
+    return {"per_combo": {tf: per_bar * estimate_bars(tf, history_of(query, tf, "sweep")) + 0.001
+                          for tf in tfs}}
+
+
 def data_info() -> dict:
     """Where intraday candles come from, for the pages' notes and the Data page."""
     from . import alpaca
@@ -465,6 +519,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/scan/start": self.api_scan_start, "/api/scan/status": self.api_scan_status,
                   "/api/scan/cancel": self.api_scan_cancel,
                   "/settings": self.settings_page, "/api/prop": self.api_prop,
+                  "/api/estimate": self.api_estimate,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
         if handler is None:
@@ -566,6 +621,9 @@ class Handler(BaseHTTPRequestHandler):
         seen = {r["symbol"] for r in local}
         self.send_json({"query": q, "local": local,
                         "remote": [r for r in remote if r["symbol"] not in seen], "error": error})
+
+    def api_estimate(self, query):
+        self.send_json(estimate_payload(query))
 
     def api_prop(self, query):
         self.send_json(prop_payload(query))
