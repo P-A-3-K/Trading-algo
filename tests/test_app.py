@@ -102,3 +102,16 @@ def test_unknown_ticker_message(monkeypatch):
     monkeypatch.setattr(dl.requests, "get", lambda *a, **k: Resp())
     with pytest.raises(ValueError, match="no data for 'ZZZZQ'"):
         dl.fetch("ZZZZQ")
+
+
+def test_phone_mode_address_helpers(monkeypatch):
+    assert "Wi-Fi" in app.describe_address("192.168.1.23")
+    assert "Wi-Fi" in app.describe_address("10.0.0.5")
+    assert "Tailscale" in app.describe_address("100.101.102.103")
+    import socket
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [
+        (0, 0, 0, "", ("127.0.0.1", 0)), (0, 0, 0, "", ("169.254.3.4", 0)),
+        (0, 0, 0, "", ("100.70.1.2", 0)), (0, 0, 0, "", ("192.168.1.23", 0))])
+    addrs = app.lan_addresses()
+    assert "127.0.0.1" not in addrs and "169.254.3.4" not in addrs
+    assert {"100.70.1.2", "192.168.1.23"} <= set(addrs)

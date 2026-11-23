@@ -2,6 +2,7 @@
 
     python -m quantlab.app                 # starts on http://127.0.0.1:8000 and opens your browser
     python -m quantlab.app --port 8050 --no-browser
+    python -m quantlab.app --phone           # also reachable from your phone on the same Wi-Fi
 
 Pages and data it serves:
     /                                   chart page; choose with the address, e.g.
@@ -364,18 +365,72 @@ def make_server(host="127.0.0.1", port=8000) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), Handler)
 
 
+def lan_addresses() -> list:
+    """This computer's addresses that other devices can reach (Wi-Fi/LAN, Tailscale).
+
+    Leaves out 127.x (this computer only) and 169.254.x (no network).
+    """
+    import socket
+    found = []
+    try:                                   # the address used for the default route
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))   # no packet is sent for UDP connect
+            found.append(s.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            found.append(info[4][0])
+    except OSError:
+        pass
+    out = []
+    for ip in found:
+        if ip not in out and not ip.startswith(("127.", "169.254.", "0.")):
+            out.append(ip)
+    return out
+
+
+def describe_address(ip: str) -> str:
+    """Which kind of network an address belongs to, for the start-up message."""
+    a, b = (int(x) for x in ip.split(".")[:2])
+    if a == 100 and 64 <= b <= 127:
+        return "Tailscale (works from anywhere on your Tailscale devices)"
+    if a == 192 and b == 168 or a == 10 or a == 172 and 16 <= b <= 31:
+        return "same Wi-Fi / home network"
+    return "network"
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run the QuantLab web app.")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--host", default="127.0.0.1",
                     help="127.0.0.1 = only this computer (default)")
+    ap.add_argument("--phone", action="store_true",
+                    help="also allow other devices (your phone) on your network to connect")
     ap.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
     args = ap.parse_args(argv)
-    server = make_server(args.host, args.port)
-    url = f"http://{args.host}:{server.server_address[1]}/"
-    print(f"QuantLab is running at {url}  (press Ctrl+C to stop)")
+    host = "0.0.0.0" if args.phone else args.host
+    server = make_server(host, args.port)
+    port = server.server_address[1]
+    local = f"http://127.0.0.1:{port}/"
+    print(f"QuantLab is running at {local}  (press Ctrl+C to stop)")
+    if host == "0.0.0.0":
+        addrs = lan_addresses()
+        print()
+        if addrs:
+            print("  On your phone, open one of these in the browser:")
+            for ip in addrs:
+                print(f"      http://{ip}:{port}/      ({describe_address(ip)})")
+        else:
+            print("  Couldn't find this computer's network address. Run 'ipconfig' and use")
+            print(f"  the IPv4 address it shows: http://<that address>:{port}/")
+        print()
+        print("  Your phone must be on the same Wi-Fi (or on Tailscale).")
+        print("  NOTE: there is no password, so anyone on this network can open QuantLab")
+        print("  while this window is open. Fine at home; don't use it on public Wi-Fi.")
+        print()
     if not args.no_browser:
-        threading.Timer(0.5, webbrowser.open, args=(url,)).start()
+        threading.Timer(0.5, webbrowser.open, args=(local,)).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

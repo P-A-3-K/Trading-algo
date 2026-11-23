@@ -12,6 +12,11 @@ opens QuantLab at http://127.0.0.1:8000; close the window or press Ctrl+C to sto
 
 To get the newest version and start: double-click **`update.bat`** (or `./update.sh`).
 
+**On your phone:** double-click **`start-phone.bat`** (or `./start-phone.sh`). The window shows
+the address to open in your phone's browser, e.g. `http://192.168.1.23:8000`. The phone must
+be on the same Wi-Fi (or use [Tailscale](https://tailscale.com) to reach it from anywhere).
+There's no password, so only do this on your home network.
+
 **Timeframes:** pick 5m, 15m, 30m, 1h, 4h or 1 day in the app. Intraday candles include
 pre-market and after-hours (4:00-20:00 New York). Free intraday history is short (5m: last
 60 days, 1h: last 2 years), so QuantLab keeps every download and your history grows.
