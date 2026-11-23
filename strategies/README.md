@@ -12,7 +12,8 @@ code to change, no restart: save the file and refresh the browser.
    copy strategies\_template.py strategies\my_idea.py      (Windows)
    cp strategies/_template.py strategies/my_idea.py        (Mac/Linux)
    ```
-2. **Rename** the class (`class RsiReversion` → `class MyIdea`) and set `name` and `description`.
+2. **Rename** the class (`class MyStrategy` → `class MyIdea`) and set `name`, `description` and `guide`
+   (the text in the app's **ⓘ How it works** panel). Add `help="..."` to each `Param` for its hover tip.
 3. **Write your idea** in `params` (the settings) and `compute()` (the positions).
 4. **Check it** in the terminal:
    ```
@@ -82,7 +83,9 @@ range, assume the stop: daily bars don't show which came first). See `fvg.py`.
 
 | File | What it is |
 |---|---|
-| `_template.py` | Fully commented starter (RSI mean reversion). Hidden from the app because of the `_`. |
+| `_template.py` | Fully commented starter (class `MyStrategy`, a simple RSI idea). Hidden from the app because of the `_`. |
 | `donchian_breakout.py` | Example: buy new N-day highs, sell new M-day lows. |
+| `macd.py` | MACD crossover: long (or short) while MACD is above (below) its signal line. |
+| `rsi.py` | RSI reversion: buy oversold, sell the bounce; optional shorts. |
 | `fvg.py` | Fair value gap retest: next-open entry, swing stop, reward:risk target, risk-% sizing, long & short. Uses `self.trade(...)`. |
 | `README.md` | This guide. |

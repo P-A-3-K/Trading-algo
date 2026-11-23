@@ -97,7 +97,8 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
   border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
 .appbar input { width: 8.5em; text-transform: uppercase; }
 .params { display: contents; }
-.params .field span { max-width: 17em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.params .field .lbl-row { display: flex; align-items: center; gap: 2px; max-width: 17em; }
+.params .field .lbl-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .appbar .param input { width: 7em; text-transform: none; }
 .param.changed input { border-color: var(--accent); }
 .appbar input:invalid { border-color: var(--down); }
@@ -111,6 +112,31 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .notice-box code { font-family: var(--mono); }
 .costFields { display: contents; }
 .costFields[hidden] { display: none !important; }
+.guide-btn { align-self: flex-end; color: var(--accent); white-space: nowrap; }
+.guide-btn[aria-expanded="true"] { color: var(--panel); background: var(--accent); border-color: var(--accent); }
+.guide { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 18px 16px; }
+.guide[hidden] { display: none; }
+.guide-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.guide-head h3 { margin: 0; font: 600 16px/1.3 var(--sans); }
+.guide-close { padding: 6px 10px; }
+.guide-body { columns: 2 380px; column-gap: 36px; font-size: 14px; line-height: 1.55; }
+.guide-body h4 { margin: 14px 0 4px; font: 600 12px/1.3 var(--sans); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); break-after: avoid; }
+.guide-body p, .guide-body ul, .guide-body dl { margin: 0 0 8px; break-inside: avoid; }
+.guide-body ul { padding-left: 18px; }
+.guide-body li { margin: 2px 0; }
+.guide-body code { font-family: var(--mono); font-size: 13px; }
+.guide-settings dt { font-weight: 600; margin-top: 6px; }
+.guide-settings dd { margin: 0; color: var(--muted); }
+.guide-note { color: var(--muted); font-size: 13px; }
+.field span.tip-i, span.tip-i { display: inline-block; flex: none; margin-left: 4px; width: 14px; height: 14px; border-radius: 50%; border: 1px solid currentColor;
+  font: 600 9px/12px var(--sans); text-align: center; text-transform: none; letter-spacing: 0; cursor: help; position: relative;
+  color: var(--muted); vertical-align: 1px; }
+.field span.tip-i:hover, .field span.tip-i:focus, span.tip-i:hover, span.tip-i:focus { color: var(--accent); outline: none; }
+span.tip-i:hover::after, span.tip-i:focus::after { content: attr(data-tip); position: absolute; left: 50%; top: calc(100% + 8px);
+  transform: translateX(-50%); width: max-content; max-width: min(280px, 80vw); white-space: normal; z-index: 20;
+  background: var(--fg); color: var(--bg); font: 400 12px/1.45 var(--sans); padding: 7px 9px; border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18); text-align: left; }
 .navlink { align-self: center; font: 500 13px/1 var(--mono); color: var(--accent); }
 .desc { flex: 1 1 260px; min-width: 0; align-self: center; color: var(--muted); font-size: 13px; }
 footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
@@ -127,6 +153,7 @@ footer a { color: inherit; }
     <datalist id="tickerList"></datalist>
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
+    <button type="button" class="guide-btn" id="guideBtn" aria-expanded="false" aria-controls="guidePanel" hidden>ⓘ How it works</button>
     <span id="settingsIn" class="params"></span>
     <span id="costsIn" class="params"></span>
     <button type="submit" class="run" id="runBtn">Run</button>
@@ -134,6 +161,7 @@ footer a { color: inherit; }
     <a class="navlink" id="optLink" href="/optimize" title="Try every combination of this strategy's settings">Optimize →</a>
     <span class="desc" id="stratDesc"></span>
   </form>
+  <section class="guide" id="guidePanel" hidden aria-label="How this strategy works"></section>
   <div class="notice-box" id="stratNotice" role="status" hidden></div>
   <header>
     <div class="id">
@@ -472,6 +500,48 @@ function costControls(slot, C, formId, onPreset) {
   });
 }
 
+
+// ---- Strategy guide ("How it works") and setting tips -------------------------------
+// Guide text uses light formatting: "## Heading", "- bullet", **bold**, *italic*.
+function renderGuide(text) {
+  const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\*(.+?)\*/g, "<i>$1</i>");
+  const out = [];
+  let list = null, para = [];
+  const flushPara = () => { if (para.length) { out.push(`<p>${inline(para.join(" "))}</p>`); para = []; } };
+  const flushList = () => { if (list) { out.push(`<ul>${list.map(li => `<li>${inline(li)}</li>`).join("")}</ul>`); list = null; } };
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("## ")) { flushPara(); flushList(); out.push(`<h4>${inline(line.slice(3))}</h4>`); }
+    else if (line.startsWith("- ")) { flushPara(); (list = list || []).push(line.slice(2)); }
+    else if (!line) { flushPara(); flushList(); }
+    else { flushList(); para.push(line); }
+  }
+  flushPara(); flushList();
+  return out.join("");
+}
+function setupGuide(btn, panel, strategy, intraday) {
+  if (!strategy) { btn.hidden = true; return; }
+  const params = Object.entries(strategy.params || {}).filter(([, p]) => intraday || !p.intraday_only);
+  const settings = params.length ? `<h4>Settings in this app</h4><dl class="guide-settings">` +
+    params.map(([k, p]) => `<dt>${esc(p.label || k)}</dt><dd>${esc(p.help || "No explanation yet.")}</dd>`).join("") + `</dl>` : "";
+  const body = strategy.guide ? renderGuide(strategy.guide)
+    : `<p>${esc(strategy.description || "")}</p><p class="guide-note">This strategy has no guide yet: add a <code>guide</code> text to its class (see strategies/_template.py).</p>`;
+  panel.innerHTML = `<div class="guide-head"><h3>How it works: ${esc(strategy.name)}</h3>` +
+    `<button type="button" class="guide-close" aria-label="Hide the explanation">✕</button></div>` +
+    `<div class="guide-body">${body}${settings}</div>`;
+  const KEY = "quantlab.guideOpen";
+  const show = open => {
+    panel.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    try { localStorage.setItem(KEY, open ? "1" : "0"); } catch (e) {}
+  };
+  btn.hidden = false;
+  btn.addEventListener("click", () => show(panel.hidden));
+  panel.querySelector(".guide-close").addEventListener("click", () => { show(false); btn.focus(); });
+  let open = false;
+  try { open = localStorage.getItem(KEY) === "1"; } catch (e) {}
+  show(open);
+}
+
 // ---- App controls (only when served by quantlab.app) -------------------------
 if (DATA.app) {
   const A = DATA.app, form = document.getElementById("appbar");
@@ -492,6 +562,8 @@ if (DATA.app) {
   describe();
   // One number box per strategy setting, built from the strategy's params:
   // label, allowed range and step come from Param(default, min, max, label, step)
+  const tipIcon = p => p.help ? `<span class="tip-i" tabindex="0" role="note" aria-label="${esc(p.help)}" data-tip="${esc(p.help)}">i</span>` : "";
+  setupGuide(document.getElementById("guideBtn"), document.getElementById("guidePanel"), byId[A.strategy], DATA.intraday);
   // Settings shown here: all of the strategy's, minus intraday-only ones on daily bars
   const params = Object.fromEntries(Object.entries(byId[A.strategy]?.params || {})
     .filter(([, p]) => DATA.intraday || !p.intraday_only));
@@ -500,13 +572,13 @@ if (DATA.app) {
     if (p.type === "bool") {                       // yes/no setting -> menu
       const changed = value !== p.default ? " changed" : "";
       return `<label class="field param${changed}" title="${esc(p.label || k)} · default ${p.default ? "yes" : "no"}">` +
-        `<span>${esc(p.label || k)}</span><select name="${esc(k)}">` +
+        `<span class="lbl-row"><span class="lbl-text">${esc(p.label || k)}</span>${tipIcon(p)}</span><select name="${esc(k)}">` +
         `<option value="0"${value ? "" : " selected"}>No</option><option value="1"${value ? " selected" : ""}>Yes</option></select></label>`;
     }
     const range = [p.min, p.max].every(v => v !== null) ? `${p.min}–${p.max}` : "";
     const changed = value !== p.default ? " changed" : "";
     return `<label class="field param${changed}" title="${esc((p.label || k) + (range ? " · allowed " + range : "") + " · default " + p.default)}">` +
-      `<span>${esc(p.label || k)}</span>` +
+      `<span class="lbl-row"><span class="lbl-text">${esc(p.label || k)}</span>${tipIcon(p)}</span>` +
       `<input type="number" name="${esc(k)}" value="${esc(value)}" required` +
       (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "") +
       ` step="${p.step ?? "any"}" inputmode="${p.type === "int" ? "numeric" : "decimal"}"></label>`;

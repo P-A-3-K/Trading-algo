@@ -44,6 +44,7 @@ class Param:
     label: str = ""
     step: Optional[float] = None   # app input step; defaults to 1 for whole numbers
     intraday_only: bool = False    # only shown/used on intraday timeframes
+    help: str = ""                 # one-line explanation, shown when hovering the setting
 
     @property
     def is_int(self) -> bool:
@@ -79,12 +80,15 @@ class Param:
         kind = "bool" if self.is_bool else "int" if self.is_int else "float"
         return {"default": self.default, "min": self.min, "max": self.max,
                 "label": self.label, "step": self.step or (1 if self.is_int else None),
-                "type": kind, "intraday_only": self.intraday_only}
+                "type": kind, "intraday_only": self.intraday_only, "help": self.help}
 
 
 # Settings every strategy gets automatically (on top of its own `params`)
 BUILTIN_PARAMS = {
-    "flat_at_close": Param(False, label="Day trade: flat outside 9:30-16:00", intraday_only=True),
+    "flat_at_close": Param(False, label="Day trade: flat outside 9:30-16:00", intraday_only=True,
+                           help="Yes: hold positions only 9:30-16:00 New York and close everything "
+                                "at the last regular-hours bar. Candles from all hours still feed "
+                                "the signals."),
 }
 
 
@@ -150,6 +154,9 @@ class StrategyResult:
 class Strategy:
     name: str = "Unnamed strategy"
     description: str = ""
+    # Longer explanation for the app's "How it works" panel. Light formatting:
+    # "## Heading" lines, "- " bullet lines, **bold**, blank line = new paragraph.
+    guide: str = ""
     params: dict = {}
 
     @classmethod
@@ -282,7 +289,9 @@ class Strategy:
     @classmethod
     def info(cls) -> dict:
         """What the app needs to list the strategy and build its settings form."""
-        return {"name": cls.name, "description": cls.description,
+        import inspect
+        guide = cls.guide or inspect.cleandoc(cls.__doc__ or "")
+        return {"name": cls.name, "description": cls.description, "guide": guide.strip(),
                 "params": {k: p.describe() for k, p in cls.all_params().items()}}
 
     def __repr__(self):

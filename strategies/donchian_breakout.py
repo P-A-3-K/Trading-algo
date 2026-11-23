@@ -12,8 +12,33 @@ class Breakout(Strategy):
     name = "Donchian breakout"
     description = ("Trend following: buy when the price closes at a new N-day high, "
                    "sell when it closes at a new M-day low.")
-    params = {"entry": Param(55, 5, 250, "Buy on a new high over (days)"),
-              "exit": Param(20, 5, 250, "Sell on a new low over (days)")}
+    params = {"entry": Param(55, 5, 250, "Buy on a new high over (days)",
+                             help="Buy when the close breaks above the highest high of this many previous bars."),
+              "exit": Param(20, 5, 250, "Sell on a new low over (days)",
+                            help="Sell when the close breaks below the lowest low of this many previous bars. Shorter = quicker exits.")}
+    guide = """
+## In short
+Buy strength: when the price closes at a new N-bar high, a trend may be starting. Get out
+when it closes at a new M-bar low.
+
+## The rules
+- **Upper channel** = highest high of the previous *entry* bars (not counting today).
+- **Lower channel** = lowest low of the previous *exit* bars.
+- Close above the upper channel: **buy**. Close below the lower channel: **sell**. Otherwise hold.
+
+## Settings
+- 55 / 20 are the "Turtle traders" numbers from the 1980s, made for commodity futures.
+- A shorter exit channel locks in gains sooner but gets shaken out more.
+
+## When it tends to work
+- Markets with big, sustained trends (commodities, currencies, some momentum stocks).
+
+## When it struggles
+- Stock indices that drift up with frequent pullbacks: many false breakouts.
+
+## Watch out
+- Many small losses and a few big wins is normal for breakouts: judge the average win vs average loss.
+"""
 
     def compute(self, bars):
         # shift(1): compare today's close with the PREVIOUS N days, not including today

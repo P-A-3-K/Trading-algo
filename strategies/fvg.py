@@ -36,11 +36,46 @@ class FairValueGap(Strategy):
     description = ("Trade the first retest of a fair value gap: enter at the next open, "
                    "stop at the last swing, take profit at a reward:risk multiple.")
     params = {
-        "rr": Param(2.0, 0.5, 10.0, "Take profit (reward:risk)", step=0.5),
-        "swing": Param(2, 1, 10, "Swing size (bars each side)"),
-        "expiry": Param(20, 1, 250, "FVG expires after (bars)"),
-        "risk_pct": Param(1.0, 0.1, 10.0, "Risk per trade (% of account)", step=0.1),
+        "rr": Param(2.0, 0.5, 10.0, "Take profit (reward:risk)", step=0.5,
+                    help="Take-profit distance as a multiple of the risk (entry to stop). 2 = aim to win twice what you risk."),
+        "swing": Param(2, 1, 10, "Swing size (bars each side)",
+                       help="A swing low/high must be lower/higher than this many bars on each side. Bigger = more important swings, wider stops."),
+        "expiry": Param(20, 1, 250, "FVG expires after (bars)",
+                        help="Forget a gap that hasn't been retested within this many bars."),
+        "risk_pct": Param(1.0, 0.1, 10.0, "Risk per trade (% of account)", step=0.1,
+                          help="Position size is set so that hitting the stop loses about this % of the account (max 100% invested)."),
     }
+    guide = """
+## In short
+A **fair value gap** is a price range the market skipped in a hurry. This strategy waits for
+the price to come back to that gap for the first time and trades in the direction of the
+original move, with a stop below the last swing and a fixed reward-to-risk target.
+
+## The rules
+- **Bullish FVG**: candle 1's high is below candle 3's low. The zone runs from candle 1's high to candle 3's low. **Bearish** is the mirror image.
+- **Signal**: the first bar that trades back into the zone (bullish: low reaches the top of the zone).
+- **Entry**: the next bar's **open**. Skipped if that open is already past the stop.
+- **Stop-loss**: the last confirmed swing low (long) / swing high (short) before the gap.
+- **Take-profit**: entry + *RR* x (entry - stop), mirrored for shorts.
+- **Exits** fill at the stop or target level, or at the open if price gaps past it. If one bar touches both, the stop is assumed (cautious).
+- One trade at a time; gaps touched during a trade are used up; untouched gaps expire.
+
+## Settings
+- **RR**: higher targets win less often but pay more per win.
+- **Swing size**: bigger swings give wider stops, so smaller positions at the same risk %.
+- **Risk per trade**: scales gains and losses almost proportionally.
+
+## When it tends to work
+- Clean, directional markets where gaps act as support/resistance on the retest.
+- Intraday timeframes are where traders usually apply it; try 5m-1h with day trading on.
+
+## When it struggles
+- **Costs**: it trades often on short timeframes. Compare "Return per year before costs" with the after-cost number.
+- Choppy markets: price fills gaps and keeps going, hitting stops.
+
+## Watch out
+- The chart shows the newest untouched gap (top/bottom) and the open trade's stop and target as step lines.
+"""
 
     def compute(self, bars):
         o, h, l, c = (bars[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))

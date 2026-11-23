@@ -2,13 +2,14 @@
 
     1. Copy it:      strategies/_template.py  ->  strategies/my_idea.py
                      (any name not starting with "_"; files starting with "_" are ignored)
-    2. Rename the class (RsiReversion -> MyIdea) and change `name` and `description`.
+    2. Rename the class (MyStrategy -> MyIdea) and change `name`, `description` and `guide`.
     3. Change `params` and `compute()` to your idea.
     4. Check it:     python -m quantlab.check strategies/my_idea.py
     5. Refresh the app in your browser: it appears in the Strategy menu
        under "Your strategies", with its own settings boxes and an Optimize page.
 
-This example is a complete, working strategy: RSI mean reversion.
+This example is a complete, working strategy: RSI mean reversion (a simpler version of
+strategies/rsi.py).
 RSI (Relative Strength Index, 0-100) measures how strongly the price has been
 rising vs falling lately. Below ~30 is "oversold" (fallen a lot), above ~70 is
 "overbought". The idea: buy oversold dips, sell once the bounce is done.
@@ -18,21 +19,39 @@ import pandas as pd
 from quantlab.strategy import Param, Strategy
 
 
-class RsiReversion(Strategy):              # <- rename: the class name is the strategy's id
+class MyStrategy(Strategy):                # <- rename: the class name is the strategy's id
     # ---- Shown in the app ------------------------------------------------------------
-    name = "RSI reversion (template)"       # <- the name in the Strategy menu
+    name = "My strategy (template)"         # <- the name in the Strategy menu
     description = ("Buy when RSI drops below the 'buy below' level (oversold), "
                    "sell when it rises above the 'sell above' level.")
+    # The "How it works" panel in the app. Formatting: "## Heading" lines,
+    # "- " bullet lines, **bold**, and a blank line starts a new paragraph.
+    guide = """
+## In short
+Describe the idea in one or two sentences.
+
+## The rules
+- When it buys.
+- When it sells.
+
+## When it tends to work
+- ...
+
+## When it struggles
+- ...
+"""
 
     # ---- Settings ----------------------------------------------------------------------
     # Each Param becomes a number box in the app and a range on the Optimize page.
     #   Param(default, min, max, label)        whole numbers: write the default as 14
     #   Param(1.5, 0.1, 4.0, label, step=0.1)  decimals: write the default as 1.5
+    #   Param(False, label="Also go short")    yes/no: a Yes/No menu in the app
+    #   help="..."                             one line shown when hovering the setting
     # Read them in compute() as self.<name>, e.g. self.period.
     params = {
-        "period": Param(14, 2, 100, "RSI length (days)"),
-        "buy_below": Param(30, 5, 50, "Buy when RSI below"),
-        "sell_above": Param(55, 30, 95, "Sell when RSI above"),
+        "period": Param(14, 2, 100, "RSI length (bars)", help="How many bars RSI looks back."),
+        "buy_below": Param(30, 5, 50, "Buy when RSI below", help="Oversold level that triggers a buy."),
+        "sell_above": Param(55, 30, 95, "Sell when RSI above", help="Level where the bounce is taken."),
     }
 
     # ---- Optional: check settings against each other ------------------------------------

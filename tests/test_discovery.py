@@ -86,7 +86,7 @@ def test_template_works_once_copied(folder):
     src = Path(__file__).resolve().parents[1] / "strategies" / "_template.py"
     write(folder, "my_idea.py", src.read_text(encoding="utf-8"))
     s = discovery.scan(folder)
-    f = s.strategies["RsiReversion"]
+    f = s.strategies["MyStrategy"]
     assert f.problem == "" and set(f.cls.params) == {"period", "buy_below", "sell_above"}
     assert discovery.scan(folder.parent / "nothing-here").strategies == {}
 
@@ -98,7 +98,7 @@ def test_cheating_inside_an_indicator_is_caught(folder):
                        "rsi = self.rsi(bars.close.shift(-1), self.period)")
     assert peek != src
     write(folder, "peek.py", peek)
-    assert "looks into the future" in discovery.scan(folder).strategies["RsiReversion"].problem
+    assert "looks into the future" in discovery.scan(folder).strategies["MyStrategy"].problem
 
 
 def test_check_command(tmp_path, monkeypatch, capsys):
