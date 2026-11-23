@@ -24,6 +24,20 @@ from .metrics import cagr, max_drawdown, round_trips, sharpe
 
 MAX_COMBINATIONS = 5000
 START = 10_000
+PROP_DD = 0.05          # "prop-safe" size: scaled so the worst drawdown is 5% (half a 10% limit)
+PROP_MAX_SIZE = 20.0
+
+
+def prop_return(r: np.ndarray, max_dd: float, ppy: float) -> float:
+    """Return per year if the position were scaled so its worst drawdown is PROP_DD.
+
+    A smooth strategy can be traded bigger inside a prop firm's loss limit, so this
+    ranks by what you could earn there, not by the raw return."""
+    if not max_dd or max_dd >= 0:
+        return np.nan
+    size = min(PROP_DD / -max_dd, PROP_MAX_SIZE)
+    return float(np.expm1(ppy * np.mean(np.log1p(np.maximum(size * r, -0.999999)))))
+
 
 
 def values(start, stop, step, is_int=True) -> list:
@@ -89,11 +103,13 @@ def segment_stats(returns: pd.Series, held: pd.Series, prefix: str, ppy: float =
     else:
         win_rate = np.nan
     changes = np.count_nonzero(np.diff(h)) + (h[0] != 0)
+    max_dd = float((growth / np.maximum.accumulate(growth) - 1).min())
     return {
         f"{prefix}_final": START * float(total),
         f"{prefix}_cagr": float(total ** (ppy / n) - 1),
         f"{prefix}_sharpe": float(r.mean() / sd * np.sqrt(ppy)) if sd > 0 else 0.0,
-        f"{prefix}_max_dd": float((growth / np.maximum.accumulate(growth) - 1).min()),
+        f"{prefix}_max_dd": max_dd,
+        f"{prefix}_prop": prop_return(r, max_dd, ppy),
         f"{prefix}_trades": int(changes),
         f"{prefix}_win_rate": win_rate,
         f"{prefix}_exposure": float(in_trade.mean()),
@@ -199,6 +215,11 @@ def _metric(R: np.ndarray, H: np.ndarray, metric: str, ppy: float = YEAR) -> np.
     if metric == "trades":                       # fewer is better
         changes = (np.diff(H, axis=1) != 0).sum(axis=1)
         return -changes.astype(float)
+    if metric == "prop":                         # return at the size that makes the worst drawdown 5%
+        eq = np.cumprod(1 + R, axis=1)
+        dd = (eq / np.maximum.accumulate(eq, axis=1) - 1).min(axis=1)
+        out = np.array([prop_return(R[i], dd[i], ppy) for i in range(len(R))])
+        return np.where(np.isfinite(out), out, -np.inf)
     raise ValueError(f"unknown metric {metric!r}")
 
 

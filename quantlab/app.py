@@ -12,6 +12,7 @@ Pages and data it serves:
     /api/backtest?ticker=SPY&strategy=MeanReversion&entry=1.5   the page's data as JSON
     /optimize?ticker=SPY&strategy=SmaCrossover   parameter sweep: one split, walk-forward,
                                         or mode=scan&tickers=SPY,QQQ&tfs=1d,1h (many markets)
+    /api/prop?<chart address>&prop=two_step   prop firm challenge odds at several sizes
     /settings                           Data page: where candles come from; Alpaca keys
     /api/scan/start, /api/scan/status?id=, /api/scan/cancel?id=   a market scan runs in the
                                         background; the page polls for progress
@@ -31,6 +32,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import math
+
+import pandas as pd
 
 from . import chart, optimize, strategies, universe
 from . import download as dl
@@ -53,7 +56,7 @@ def strategy_from_query(query: dict):
     return cls(**settings)
 
 
-RANK_METRICS = ("sharpe", "cagr", "final", "max_dd", "trades")
+RANK_METRICS = ("sharpe", "cagr", "final", "max_dd", "trades", "prop")
 
 
 def nice_step(span: float, is_int: bool, target: int = 19) -> float:
@@ -159,6 +162,67 @@ def data_info() -> dict:
     """Where intraday candles come from, for the pages' notes and the Data page."""
     from . import alpaca
     return {"alpaca": alpaca.enabled(), "histories": HISTORY_MENU}
+
+
+PROP_FIELDS = {"p_target": "target", "p_target2": "target2", "p_maxloss": "max_loss",
+               "p_daily": "daily_loss"}
+
+
+def prop_rules_of(query: dict):
+    """Challenge rules from the address: prop=two_step|one_step|strict|custom (+ p_* fields, in %)."""
+    from dataclasses import replace
+    from . import prop
+    name = query.get("prop") or "two_step"
+    if name != "custom":
+        if name not in prop.PRESETS:
+            raise ValueError(f"Unknown prop preset {name!r}. Choose from: {', '.join(prop.PRESETS)}, custom")
+        return prop.PRESETS[name][1]
+    rules = prop.Rules()
+    changes = {}
+    for q, field in PROP_FIELDS.items():
+        if query.get(q, "") != "":
+            try:
+                v = float(query[q]) / 100
+            except ValueError:
+                raise ValueError(f"{field} must be a number (in %)")
+            if not 0 <= v <= 1 or (v == 0 and field != "target2"):
+                raise ValueError(f"{field} must be between 0% and 100%")
+            changes[field] = v
+    if query.get("p_days", "") != "":
+        changes["max_days"] = int(float(query["p_days"]))
+    changes["trailing"] = query.get("p_trailing") == "1"
+    return replace(rules, **changes)
+
+
+def prop_payload(query: dict) -> dict:
+    """The Prop firm check for the chart's strategy: its own returns (whole history,
+    or the training / test period), reshuffled into many futures, at several sizes."""
+    from . import prop
+    from .backtest import run_backtest, simulate
+    from .costs import CostModel
+    ticker = dl.clean_ticker(query.get("ticker") or DEFAULT_TICKER)
+    strategy = strategy_from_query(query)
+    if strategy is None:
+        raise ValueError("Pick a strategy first: the check runs on its results.")
+    tf = timeframe_of(query)
+    bars = dl.load_bars(ticker, tf, history_of(query, tf))
+    costs = costs_of(query)[1] or CostModel()
+    prepared = costs.prepare(bars)
+    strat = simulate(bars, strategy.run(bars), costs=prepared).returns
+    bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), costs=prepared).returns
+    period = query.get("period") or "all"
+    if query.get("test_from") and period in ("train", "test"):
+        cut = chart.split_index(bars.index, query["test_from"])
+        part = slice(None, cut) if period == "train" else slice(cut, None)
+        strat, bench = strat.iloc[part], bench.iloc[part]
+    rules = prop_rules_of(query)
+    out = prop.check(strat, rules)
+    out["benchmark"] = prop.check(bench, rules, sizes=[r["size"] for r in out["rows"]])["rows"]
+    out["period"] = period
+    out["from"], out["to"] = chart.when(strat.index[0]), chart.when(strat.index[-1])
+    out["presets"] = {k: {"label": v[0], **{q: round(getattr(v[1], f) * 100, 4) for q, f in PROP_FIELDS.items()},
+                          "p_trailing": v[1].trailing, "p_days": v[1].max_days} for k, v in prop.PRESETS.items()}
+    return out
 
 
 def settings_payload(local: bool, message: str = "", error: bool = False, key_id: str = "") -> dict:
@@ -400,7 +464,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/search": self.api_search,
                   "/api/scan/start": self.api_scan_start, "/api/scan/status": self.api_scan_status,
                   "/api/scan/cancel": self.api_scan_cancel,
-                  "/settings": self.settings_page,
+                  "/settings": self.settings_page, "/api/prop": self.api_prop,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
         if handler is None:
@@ -502,6 +566,9 @@ class Handler(BaseHTTPRequestHandler):
         seen = {r["symbol"] for r in local}
         self.send_json({"query": q, "local": local,
                         "remote": [r for r in remote if r["symbol"] not in seen], "error": error})
+
+    def api_prop(self, query):
+        self.send_json(prop_payload(query))
 
     def api_scan_start(self, query):
         self.send_json({"id": SCANS.start(query)})

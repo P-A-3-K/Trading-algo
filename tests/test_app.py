@@ -180,3 +180,16 @@ def test_chart_splits_training_and_test_periods(server):
     assert plain["split"] is None
     status, body = get(server + "/api/backtest?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30&test_from=2035-01-01")
     assert status == 400 and "test period" in json.loads(body)["error"]
+
+
+def test_prop_check_route(server):
+    status, body = get(server + "/api/prop?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30")
+    assert status == 200, body
+    d = json.loads(body)
+    assert d["rules"]["target"] == 0.10 and len(d["rows"]) >= 8 and len(d["benchmark"]) == len(d["rows"])
+    status, body = get(server + "/api/prop?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30&prop=custom"
+                       "&p_target=8&p_target2=0&p_maxloss=6&p_daily=3&p_trailing=1")
+    d = json.loads(body)
+    assert d["rules"] == {**d["rules"], "target": 0.08, "target2": 0.0, "max_loss": 0.06, "trailing": True}
+    assert get(server + "/api/prop?ticker=TEST&strategy=SmaCrossover&prop=nope")[0] == 400
+    assert get(server + "/api/prop?ticker=TEST&strategy=none")[0] == 400

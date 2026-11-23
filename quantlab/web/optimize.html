@@ -589,10 +589,12 @@ const METRICS = {
   max_dd: { label: "Worst drawdown", fmt: v => (v * 100).toFixed(1) + "%", better: "higher" },
   trades: { label: "Trades", fmt: v => Math.round(v).toLocaleString(), better: "lower" },
   win_rate: { label: "Win rate", fmt: v => (v * 100).toFixed(0) + "%", better: "higher" },
+  prop: { label: "Return / yr at 5% drawdown", fmt: v => (v * 100).toFixed(1) + "%", better: "higher" },
 };
 const rankIn = document.getElementById("rankIn");
-rankIn.innerHTML = ["sharpe", "cagr", "final", "max_dd", "trades"].map(k =>
-  `<option value="${k}">${METRICS[k].label}${k === "trades" ? " (fewest)" : ""}</option>`).join("");
+rankIn.innerHTML = ["sharpe", "cagr", "final", "max_dd", "trades", "prop"].map(k =>
+  `<option value="${k}">${METRICS[k].label}${k === "trades" ? " (fewest)" : k === "prop" ? " (prop firms)" : ""}</option>`).join("");
+rankIn.title = "Return / yr at 5% drawdown: the yearly return if the position were sized so the worst drawdown is 5% (half a typical 10% prop-firm limit). Rewards smooth equity curves.";
 rankIn.value = A.rank;
 
 // One row per setting: from / to / step
@@ -833,6 +835,7 @@ function drawScan(R) {
     oos_cagr: { label: "Out-of-sample return / year", get: m => m.best_oos_cagr, mid: 0, fmt: x => (x * 100).toFixed(0) + "%" },
     share: { label: "Share of all settings that beat B&H (OOS)", get: m => m.share_beat_bh, mid: 0.5, fmt: x => Math.round(x * 100) + "%" },
     median: { label: "Median OOS Sharpe over all settings", get: m => m.median_oos_sharpe, mid: 0, fmt: num },
+    prop: { label: "OOS return / yr at 5% drawdown (prop firms)", get: m => m.best_oos_prop, mid: 0, fmt: x => (x * 100).toFixed(1) + "%" },
     is: { label: "Best in-sample Sharpe (optimistic!)", get: m => m.best_is_sharpe, mid: 0, fmt: num },
   };
   const sel = document.getElementById("scanMetric");
@@ -908,6 +911,8 @@ function drawScan(R) {
     { key: "best_oos_cagr", label: "Return / yr OOS", fmt: pct, signed: true },
     { key: "bh_oos_cagr", label: "B&H return / yr OOS", fmt: pct, signed: true },
     { key: "best_oos_max_dd", label: "Worst DD OOS", fmt: pct, signed: true },
+    { key: "best_oos_prop", label: "Return / yr at 5% DD OOS", fmt: pct, signed: true },
+    { key: "bh_oos_prop", label: "B&H at 5% DD", fmt: pct, signed: true },
     { key: "best_oos_trades", label: "Trades OOS", fmt: x => x === null ? "–" : Math.round(x).toLocaleString() },
     { key: "share_beat_bh", label: "Settings beating B&H", fmt: x => x === null ? "–" : Math.round(x * 100) + "%", sep: true },
     { key: "oos_days", label: "Test days", fmt: x => x === undefined ? "–" : x.toLocaleString() },
@@ -1170,8 +1175,8 @@ if (RES && RES.mode !== "wf") {
   // ---- Table ----
   const cols = [
     ...params.map(([k, p]) => ({ key: k, label: k, grp: "", fmt: v => v })),
-    ...["final", "cagr", "sharpe", "max_dd", "trades", "win_rate"].map((k, i) => ({ key: "is_" + k, label: METRICS[k].label, grp: "is", sep: i === 0, fmt: METRICS[k].fmt, signed: ["cagr", "max_dd"].includes(k) })),
-    ...["final", "cagr", "sharpe", "max_dd", "trades"].map((k, i) => ({ key: "oos_" + k, label: METRICS[k].label, grp: "oos", sep: i === 0, fmt: METRICS[k].fmt, signed: ["cagr", "max_dd"].includes(k) })),
+    ...["final", "cagr", "sharpe", "max_dd", "prop", "trades", "win_rate"].map((k, i) => ({ key: "is_" + k, label: METRICS[k].label, grp: "is", sep: i === 0, fmt: METRICS[k].fmt, signed: ["cagr", "max_dd"].includes(k) })),
+    ...["final", "cagr", "sharpe", "max_dd", "prop", "trades"].map((k, i) => ({ key: "oos_" + k, label: METRICS[k].label, grp: "oos", sep: i === 0, fmt: METRICS[k].fmt, signed: ["cagr", "max_dd"].includes(k) })),
   ];
   let sortKey = "is_" + rk, sortDir = sign, limit = 50;
   const thead = document.querySelector("#table thead"), tbody = document.querySelector("#table tbody");

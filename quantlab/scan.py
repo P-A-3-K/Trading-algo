@@ -27,7 +27,8 @@ MIN_BARS = 200                # less history than this: skip the market
 THIN_TEST_DAYS = 60           # fewer OOS trading days: results flagged as unreliable
 
 # Rank-by choices: which column picks a market's settings, and which way is better
-BETTER = {"sharpe": "higher", "cagr": "higher", "final": "higher", "max_dd": "higher", "trades": "lower"}
+BETTER = {"sharpe": "higher", "cagr": "higher", "final": "higher", "max_dd": "higher", "trades": "lower",
+          "prop": "higher"}
 
 
 class Cancelled(Exception):
@@ -68,8 +69,9 @@ def summarize_market(res, rank: str, params: list) -> dict:
     return {
         "settings": {k: (best[k].item() if hasattr(best[k], "item") else best[k]) for k in params} if best is not None else None,
         **{f"best_{k}": _num(best[k]) if best is not None else None
-           for k in ("is_sharpe", "is_cagr", "is_final", "is_max_dd", "is_trades",
-                     "oos_sharpe", "oos_cagr", "oos_final", "oos_max_dd", "oos_trades", "oos_win_rate")},
+           for k in ("is_sharpe", "is_cagr", "is_final", "is_max_dd", "is_trades", "is_prop",
+                     "oos_sharpe", "oos_cagr", "oos_final", "oos_max_dd", "oos_trades", "oos_win_rate", "oos_prop")},
+        "bh_oos_prop": _num(bench.get("oos_prop")),
         "bh_is_sharpe": _num(bench.get("is_sharpe")), "bh_oos_sharpe": _num(bh_oos),
         "bh_is_cagr": _num(bench.get("is_cagr")), "bh_oos_cagr": _num(bench.get("oos_cagr")),
         "median_oos_sharpe": _num(oos_sharpe.median()) if len(oos_sharpe) else None,

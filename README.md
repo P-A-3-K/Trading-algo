@@ -21,6 +21,11 @@ There's no password, so only do this on your home network.
 pre-market and after-hours (4:00-20:00 New York). Free intraday history is short (5m: last
 60 days, 1h: last 2 years), so QuantLab keeps every download and your history grows.
 Any strategy can be set to **day trade** (flat outside 9:30-16:00) on intraday timeframes.
+**Prop firm check:** under the results on the chart page. Pick the challenge rules (two-step,
+one-step trailing, or your own) and it plays them on thousands of simulated futures built from the
+strategy's own results, at several position sizes: pass and fail odds, time to pass, how long a
+funded account survives, and the largest "safe" size. On the Optimize page, rank by
+**Return / yr at 5% drawdown** to look for strategies that suit prop accounts.
 **Years of intraday history:** connect a free [Alpaca](https://alpaca.markets) account on the
 app's **Data** page (paste the API key ID and secret; they stay on your computer). Then 5m-4h
 candles go back to 2016 instead of 60 days. Use the **History** menu to choose how much to load.
@@ -61,6 +66,7 @@ pytest -q
 | `quantlab/optimize.py` | Parameter sweep: every combination of settings, scored in-sample and out-of-sample; overfitting report; walk-forward (re-optimize each window, trade the next) |
 | `quantlab/scan.py` | Market scan: the same sweep on many tickers × timeframes; settings picked in-sample per market, compared out-of-sample; settings ranked across all markets |
 | `quantlab/alpaca.py` | Alpaca market data: years of 5m candles, saved and updated incrementally; keys kept in `alpaca_keys.json` (git-ignored) |
+| `quantlab/prop.py` | Prop firm check: challenge rules (target, max/trailing loss, daily loss) played on block-bootstrapped futures at many position sizes; safe size |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |

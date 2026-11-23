@@ -54,6 +54,20 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .seg button { border: 0; border-radius: 0; padding: 8px 12px; background: var(--panel); }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-checked="true"] { background: var(--accent); color: var(--panel); }
+.prop { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.prop[hidden] { display: none; }
+.prop .rules { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.prop .rules input { width: 5.5em; }
+.prop .rules .pf[hidden] { display: none; }
+.prop-verdict { margin: 0; max-width: 85ch; }
+.prop-verdict b { font-weight: 600; }
+.prop table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.prop th, .prop td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.prop th { font: 500 11px/1.25 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); white-space: normal; vertical-align: bottom; }
+.prop td { font: 400 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+.prop tr.safe td { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.prop td.bad { color: var(--down); } .prop td.good { color: var(--up); }
+.prop .note { color: var(--muted); font-size: 12px; margin: 0; max-width: 90ch; }
 .rhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
 h2 { margin: 0; font: 600 16px/1.2 var(--sans); }
 h2 small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
@@ -102,7 +116,7 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .brand { font: 600 15px/1 var(--sans); letter-spacing: .02em; align-self: center; margin-right: 6px; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field span { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.appbar input, .appbar select { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg);
+.appbar input, .appbar select, .prop input, .prop select { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg);
   border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
 .appbar input { width: 8.5em; text-transform: uppercase; }
 .params { display: contents; }
@@ -112,9 +126,11 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
 .param.changed input { border-color: var(--accent); }
 .appbar input:invalid { border-color: var(--down); }
 .appbar select { max-width: 100%; }
-.appbar input:focus-visible, .appbar select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.appbar button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; font-size: 13px; }
-.appbar button.run:disabled { opacity: .7; cursor: progress; }
+.prop select { max-width: 100%; }
+.appbar input:focus-visible, .appbar select:focus-visible, .prop input:focus-visible, .prop select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.prop button.run { font: 500 13px/1 var(--mono); border: 1px solid var(--accent); border-radius: 6px; cursor: pointer; }
+.appbar button.run, .prop button.run { color: var(--panel); background: var(--accent); border-color: var(--accent); padding: 9px 16px; font-size: 13px; }
+.appbar button.run:disabled, .prop button.run:disabled { opacity: .7; cursor: progress; }
 .notice-box { border: 1px solid var(--line); border-left: 4px solid var(--down); border-radius: 8px; background: var(--panel);
   padding: 10px 14px; font-size: 13px; }
 .notice-box ul { margin: 6px 0 0; padding-left: 18px; }
@@ -226,6 +242,13 @@ footer a { color: inherit; }
         <thead><tr><th scope="col">Statistic</th><th scope="col">Strategy</th><th scope="col">Buy &amp; hold</th></tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+    <div class="prop" id="propWrap" hidden>
+      <div class="rhead"><h2>Prop firm check <small>would it pass a funded-account challenge, and at what size?</small></h2></div>
+      <div class="rules" id="propRules"></div>
+      <p class="prop-verdict" id="propVerdict"></p>
+      <div class="tablewrap" id="propTableWrap" hidden><table id="propTable"></table></div>
+      <p class="note" id="propNote"></p>
     </div>
     <div class="luck" id="luckWrap" hidden>
       <div class="rhead"><h2>Could it be luck? <small id="luckNote"></small></h2></div>
@@ -777,6 +800,77 @@ if (DATA.app) {
 }
 
 
+
+// ---- Prop firm check ------------------------------------------------------------------
+// Runs on demand: reshuffles the strategy's own results into many futures and plays the
+// challenge rules at several position sizes (quantlab/prop.py).
+let propStale = null;
+if (DATA.equity) {
+  const wrap = document.getElementById("propWrap"), rulesEl = document.getElementById("propRules");
+  const verdict = document.getElementById("propVerdict"), tbl = document.getElementById("propTable");
+  const PRESETS = { two_step: "Two-step: +10% then +5%, 10% max loss, 5% daily",
+                    one_step: "One-step: +10%, 6% trailing loss, 3% daily",
+                    strict: "Strict two-step: +8% then +5%, 8% max loss, 4% daily", custom: "Custom…" };
+  const FIELDS = [["p_target", "Target %", 10], ["p_target2", "Phase 2 target % (0 = none)", 5], ["p_maxloss", "Max loss %", 10],
+                  ["p_daily", "Daily loss %", 5], ["p_days", "Days per phase (0 = no limit)", 0]];
+  rulesEl.innerHTML = `<label class="field"><span>Challenge rules</span><select id="propPreset">` +
+    Object.entries(PRESETS).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("") + `</select></label>` +
+    FIELDS.map(([k, label, v]) => `<label class="field pf" hidden><span>${esc(label)}</span><input type="number" id="${k}" value="${v}" min="0" max="100" step="any"></label>`).join("") +
+    `<label class="field pf" hidden><span>Max loss trails</span><select id="p_trailing"><option value="0">No: from the start balance</option><option value="1">Yes: from the highest balance</option></select></label>` +
+    `<button type="button" class="run" id="propRun">Run check</button>`;
+  const presetIn = document.getElementById("propPreset"), runB = document.getElementById("propRun");
+  try { presetIn.value = localStorage.getItem("quantlab.propPreset") || "two_step"; } catch (e) {}
+  const showFields = () => rulesEl.querySelectorAll(".pf").forEach(f => { f.hidden = presetIn.value !== "custom"; });
+  presetIn.addEventListener("change", () => { showFields(); try { localStorage.setItem("quantlab.propPreset", presetIn.value); } catch (e) {} });
+  showFields();
+  wrap.hidden = false;
+  const pct = v => v === null || v === undefined ? "–" : Math.round(v * 100) + "%";
+  const pct1 = v => v === null || v === undefined ? "–" : (v * 100).toFixed(1) + "%";
+  verdict.innerHTML = `Pick the rules and press <b>Run check</b>. It takes a few seconds.`;
+  propStale = () => { if (!document.getElementById("propTableWrap").hidden) verdict.innerHTML = `The period changed: press <b>Run check</b> again for the ${CUR_PERIOD === "test" ? "test" : CUR_PERIOD === "train" ? "training" : "whole"} period.`; };
+  runB.addEventListener("click", async () => {
+    const q = new URLSearchParams(location.search);
+    q.set("ticker", DATA.ticker); q.set("tf", DATA.timeframe || "1d"); q.set("period", CUR_PERIOD);
+    q.set("prop", presetIn.value);
+    if (presetIn.value === "custom") { FIELDS.forEach(([k]) => q.set(k, document.getElementById(k).value)); q.set("p_trailing", document.getElementById("p_trailing").value); }
+    runB.disabled = true; runB.textContent = "Simulating…";
+    try {
+      const r = await fetch("/api/prop?" + q.toString()), P = await r.json();
+      if (!r.ok) throw new Error(P.error || r.statusText);
+      draw(P);
+    } catch (err) { verdict.innerHTML = `Check failed: ${esc(err.message)}`; }
+    runB.disabled = false; runB.textContent = "Run check";
+  });
+  function draw(P) {
+    const R = P.rules, rows = P.rows, B = Object.fromEntries(P.benchmark.map(b => [b.size, b]));
+    const safe = rows.find(x => x.size === P.safe);
+    const best = [...rows].sort((a, b) => b.pass - a.pass)[0];
+    const period = P.period === "test" ? "the test period" : P.period === "train" ? "the training period" : "the whole history";
+    verdict.innerHTML = (safe
+      ? `<b>Safe size: ${safe.size}×.</b> At that size the strategy's worst past drawdown (${pct1(safe.hist_dd)}) and worst day (${pct1(safe.hist_worst_day)}) used at most half of the limits. ` +
+        `It passes the challenge in <b>${pct(safe.pass)}</b> of simulated futures` + (safe.months !== null ? ` (median <b>${safe.months.toFixed(1)} months</b>)` : "") +
+        `, fails in ${pct(safe.fail)}, and a funded account survives a year in <b>${pct(safe.funded_survive)}</b>. ` +
+        (safe.open >= 0.5 ? `<b>Too slow at that size:</b> in ${pct(safe.open)} of futures it hasn't reached the target after ${Math.round(P.horizon_days / 21)} months (it makes about ${pct1(safe.cagr)} a year there). A prop account needs a smoother strategy, or one with a higher return per unit of risk. ` : "")
+      : `<b>No safe size:</b> even at ${rows[0].size}× the past drawdown or worst day used more than half the limits. `) +
+      `Bigger sizes pass faster but fail more often, and funded accounts blow up sooner. ` +
+      `Highest pass rate: ${pct(best.pass)} at ${best.size}×.`;
+    tbl.innerHTML = `<thead><tr><th>Size</th><th>Pass</th><th>Fail</th><th>Not finished in ${Math.round(P.horizon_days / 21)} months per phase</th><th>Median time to pass</th>` +
+      `<th>Funded: survives 1 year</th><th>Funded: median return in 1 year</th><th>Past worst drawdown</th><th>Past worst day</th><th>Return / year at this size</th><th>Buy &amp; hold: pass</th></tr></thead><tbody>` +
+      rows.map(x => {
+        const overDD = -x.hist_dd > R.max_loss, overDay = -x.hist_worst_day > R.daily_loss;
+        return `<tr class="${x.size === P.safe ? "safe" : ""}"><td>${x.size}×</td><td class="${x.pass >= 0.5 ? "good" : ""}">${pct(x.pass)}</td><td class="${x.fail >= 0.3 ? "bad" : ""}">${pct(x.fail)}</td><td>${pct(x.open)}</td>` +
+          `<td>${x.months === null ? "–" : x.months.toFixed(1) + " mo"}</td><td class="${x.funded_survive < 0.7 ? "bad" : ""}">${pct(x.funded_survive)}</td><td>${pct1(x.funded_return)}</td>` +
+          `<td class="${overDD ? "bad" : ""}">${pct1(x.hist_dd)}</td><td class="${overDay ? "bad" : ""}">${pct1(x.hist_worst_day)}</td><td>${pct1(x.cagr)}</td><td>${pct(B[x.size]?.pass)}</td></tr>`;
+      }).join("") + `</tbody>`;
+    document.getElementById("propTableWrap").hidden = false;
+    document.getElementById("propNote").textContent =
+      `Rules: ${P.describe}. ${P.sims.toLocaleString()} simulated futures per size, built from ${P.block}-day blocks of ${period} ` +
+      `(${P.from} → ${P.to}, ${P.days.toLocaleString()} trading days). Size 2× = twice the strategy's position (leverage). ` +
+      `Losses count at each day's lowest point; the target at the day's close. Red: past drawdown or worst day already beyond the limit. ` +
+      `The futures repeat the past's character: if it had a strong trend, they assume more of it.`;
+  }
+}
+
 // ---- Could it be luck? (block bootstrap) -----------------------------------------
 let L = DATA.luck;
 function renderLuck() {
@@ -863,6 +957,7 @@ if (DATA.luck) {
 
 // ---- Stats table --------------------------------------------------------------
 let STATS = DATA.stats;
+let CUR_PERIOD = "all";
 function renderStats() {
   const F = {
     money: v => "$" + Math.round(v).toLocaleString(),
@@ -908,7 +1003,8 @@ if (DATA.split && DATA.periods) {
     luckNote.textContent += p === "all" ? "" : ` · ${p === "test" ? "test" : "training"} period only`;
     if (zoom && EQ) EQ.chart.timeScale().setVisibleRange(p === "test" ? { from: P.time, to: EQ.last }
       : p === "train" ? { from: EQ.first, to: P.time } : { from: EQ.first, to: EQ.last });
-    lastPick = p;
+    lastPick = p; CUR_PERIOD = p;
+    if (typeof propStale === "function") propStale();
   }
   bar.hidden = false;
   seg.addEventListener("click", e => { const b = e.target.closest("button[data-p]"); if (b) pick(b.dataset.p, true); });
