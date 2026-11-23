@@ -173,6 +173,7 @@ footer a { color: inherit; }
              maxlength="16" required pattern="\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14}"
              title="A ticker symbol, e.g. SPY, AAPL, BRK-B, ^GSPC"></label>
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
+    <label class="field" id="histField" hidden title="How far back to load intraday candles"><span>History</span><select id="histIn" name="hist"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <button type="button" class="guide-btn" id="guideBtn" aria-expanded="false" aria-controls="guidePanel" hidden>ⓘ How it works</button>
     <span id="settingsIn" class="params"></span>
@@ -180,6 +181,7 @@ footer a { color: inherit; }
     <button type="submit" class="run" id="runBtn">Run</button>
     <button type="button" id="resetBtn" hidden title="Put every setting back to the strategy's default">Reset</button>
     <a class="navlink" id="optLink" href="/optimize" title="Try every combination of this strategy's settings">Optimize →</a>
+    <a class="navlink" href="/settings" title="Where the candles come from; connect Alpaca">Data</a>
     <span class="desc" id="stratDesc"></span>
   </form>
   <section class="guide" id="guidePanel" hidden aria-label="How this strategy works"></section>
@@ -345,7 +347,7 @@ const d = last.close / prev.close - 1, chg = document.getElementById("chg");
 chg.textContent = (d >= 0 ? "+" : "") + (d * 100).toFixed(2) + "%";
 chg.className = "chg " + (d >= 0 ? "up" : "down");
 document.getElementById("span").textContent =
-  `${fmtTime(bars[0].time)} → ${fmtTime(last.time)} · ${bars.length.toLocaleString()} ${DATA.intraday ? DATA.timeframe + " bars, New York time, incl. pre/after-market · prices as traded" : "days · " + (DATA.is_index ? "price index: dividends not included" : DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted")}`;
+  `${fmtTime(bars[0].time)} → ${fmtTime(last.time)} · ${bars.length.toLocaleString()} ${DATA.intraday ? DATA.timeframe + " bars, New York time, incl. pre/after-market · " + (DATA.source === "alpaca" ? "Alpaca, adjusted for dividends & splits" : "Yahoo, prices as traded") : "days · " + (DATA.is_index ? "price index: dividends not included" : DATA.adjusted ? "adjusted for dividends & splits" : "unadjusted")}`;
 
 // Legend: the bar under the cursor, or the latest bar
 const legend = document.getElementById("legend");
@@ -709,7 +711,15 @@ if (DATA.app) {
   const tfIn = document.getElementById("tfIn");
   tfIn.innerHTML = A.timeframes.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
   tfIn.value = DATA.timeframe || "1d";
-  tfIn.addEventListener("change", () => form.requestSubmit());
+  const histIn = document.getElementById("histIn");
+  if (DATA.intraday && A.data) {
+    histIn.innerHTML = A.data.histories.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
+    histIn.value = DATA.history || "all";
+    document.getElementById("histField").hidden = false;
+    histIn.addEventListener("change", () => form.requestSubmit());
+  } else histIn.disabled = true;
+  // a new timeframe starts from its own default history
+  tfIn.addEventListener("change", () => { histIn.disabled = true; form.requestSubmit(); });
   tickerPicker(tIn, A.tickers, () => form.requestSubmit());
   const byId = Object.fromEntries(A.strategies.map(s => [s.id, s]));
   sIn.innerHTML = `<option value="none">None (candles only)</option>` + strategyOptions(A.strategies);

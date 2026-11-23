@@ -12,6 +12,7 @@ Pages and data it serves:
     /api/backtest?ticker=SPY&strategy=MeanReversion&entry=1.5   the page's data as JSON
     /optimize?ticker=SPY&strategy=SmaCrossover   parameter sweep: one split, walk-forward,
                                         or mode=scan&tickers=SPY,QQQ&tfs=1d,1h (many markets)
+    /settings                           Data page: where candles come from; Alpaca keys
     /api/scan/start, /api/scan/status?id=, /api/scan/cancel?id=   a market scan runs in the
                                         background; the page polls for progress
 
@@ -138,6 +139,35 @@ def timeframe_of(query: dict) -> str:
 
 
 TIMEFRAME_MENU = [[k, v[1]] for k, v in dl.TIMEFRAMES.items()]
+HISTORY_MENU = [[k, v] for k, v in dl.HISTORY_LABELS.items()]
+# How much intraday history to use when the address doesn't say. The chart has to draw
+# every candle, so it uses less; sweeps only compute, so they can use more.
+CHART_HISTORY = {"5m": "6m", "15m": "1y", "30m": "2y", "1h": "5y", "4h": "all"}
+SWEEP_HISTORY = {"5m": "1y", "15m": "2y", "30m": "5y", "1h": "all", "4h": "all"}
+
+
+def history_of(query: dict, tf: str, page: str = "chart"):
+    """The History choice (intraday only): from the address, else the page's default."""
+    if tf == "1d":
+        return None
+    if query.get("hist"):
+        return dl.check_history(query["hist"])
+    return (CHART_HISTORY if page == "chart" else SWEEP_HISTORY)[tf]
+
+
+def data_info() -> dict:
+    """Where intraday candles come from, for the pages' notes and the Data page."""
+    from . import alpaca
+    return {"alpaca": alpaca.enabled(), "histories": HISTORY_MENU}
+
+
+def settings_payload(local: bool, message: str = "", error: bool = False, key_id: str = "") -> dict:
+    from . import alpaca
+    keys = alpaca.load_keys()
+    return {"alpaca": {"enabled": bool(keys), "key": alpaca.masked(keys[0]) if keys else "",
+                       "from": alpaca.keys_source(), "feed": alpaca.preferred_feed()},
+            "saved": alpaca.saved(), "local": local, "message": message, "error": error,
+            "key_id": key_id}
 
 
 def sweep_request(query: dict):
@@ -188,6 +218,9 @@ def optimize_payload(ticker: str, query: dict) -> dict:
            "rank": rank, "mode": mode, "wf": wf,
            "max_combos": optimize.WF_MAX_COMBINATIONS if mode == "wf" else optimize.MAX_COMBINATIONS}
     app["timeframes"], app["timeframe"] = TIMEFRAME_MENU, tf
+    hist = history_of(query, tf, "sweep")
+    app["history"], app["data"] = hist, data_info()
+    app["history_explicit"] = query.get("hist") or ""
     s_tickers, s_tfs = scan_markets_of(query, ticker, tf)
     app["scan"] = {"tickers": s_tickers, "tfs": s_tfs, "max_markets": scan.MAX_MARKETS,
                    "max_backtests": scan.MAX_BACKTESTS, "thin_days": scan.THIN_TEST_DAYS}
@@ -197,7 +230,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
     if mode == "scan":                      # runs from the page via /api/scan/start
         return payload
     if query.get("run") and mode == "wf":
-        bars = dl.load_bars(ticker, tf)
+        bars = dl.load_bars(ticker, tf, hist)
         per_year = 252 if wf["unit"] == "days" else 1        # days -> years
         res = optimize.walk_forward(bars, cls, {k: tuple(v) for k, v in ranges.items()},
                                     wf["train"] / per_year, wf["test"] / per_year,
@@ -205,7 +238,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
         payload["result"] = walk_forward_payload(res, rank)
         return payload
     if query.get("run"):
-        bars = dl.load_bars(ticker, tf)
+        bars = dl.load_bars(ticker, tf, hist)
         res = optimize.sweep(bars, cls, {k: tuple(v) for k, v in ranges.items()}, split,
                              costs=cost_model)
         if res.table.empty:
@@ -321,10 +354,15 @@ class ScanJobs:
                 raise scan.Cancelled()
             job.update(done=done, total=total, label=label)
 
+        hist = {tf: history_of(query, tf, "sweep") for tf in tfs}
+
         def work():
             try:
                 job["result"] = scan.scan(cls, {k: tuple(v) for k, v in ranges.items()}, markets,
-                                          split, rank, costs=cost_model, progress=progress)
+                                          split, rank, costs=cost_model, progress=progress,
+                                          load=lambda t, tf: dl.load_bars(t, tf, hist[tf]))
+                for m in job["result"]["markets"]:          # chart links use the same history
+                    m["hist"] = hist[m["tf"]]
                 job["state"] = "done"
             except scan.Cancelled:
                 job["state"] = "cancelled"
@@ -362,6 +400,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/search": self.api_search,
                   "/api/scan/start": self.api_scan_start, "/api/scan/status": self.api_scan_status,
                   "/api/scan/cancel": self.api_scan_cancel,
+                  "/settings": self.settings_page,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
         if handler is None:
@@ -375,13 +414,51 @@ class Handler(BaseHTTPRequestHandler):
             self.fail(url.path, HTTPStatus.INTERNAL_SERVER_ERROR,
                       f"{type(e).__name__}: {e}")
 
+    def is_local(self) -> bool:
+        """Only the computer running QuantLab may change keys (not a phone on the Wi-Fi)."""
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def do_POST(self):
+        from urllib.parse import parse_qs as parse_form
+        from . import alpaca
+        if urlparse(self.path).path != "/settings":
+            return self.send_text(HTTPStatus.NOT_FOUND, "Not found")
+        if not self.is_local():
+            return self.send_text(HTTPStatus.FORBIDDEN, "Keys can only be changed on the computer running QuantLab.")
+        length = min(int(self.headers.get("Content-Length") or 0), 10_000)
+        form = {k: v[-1] for k, v in parse_form(self.rfile.read(length).decode("utf-8", "replace")).items()}
+        try:
+            if form.get("action") == "delete":
+                alpaca.delete_keys()
+                return self.render_settings("Keys removed. Intraday candles come from Yahoo again.")
+            key_id, secret = form.get("key_id", "").strip(), form.get("secret", "").strip()
+            if not key_id or not secret:
+                raise alpaca.AlpacaError("Paste both the API key ID and the secret key.")
+            message, feed = alpaca.test_keys(key_id, secret)
+            alpaca.save_keys(key_id, secret, feed)
+            self.render_settings(message + " Saved. Open any intraday chart: the first time per ticker "
+                                 "downloads its history since 2016 (a minute or two).")
+        except alpaca.AlpacaError as e:
+            self.render_settings(str(e), error=True, key_id=form.get("key_id", ""))
+
+    def render_settings(self, message: str = "", error: bool = False, key_id: str = ""):
+        payload = settings_payload(self.is_local(), message, error, key_id)
+        page = (chart.WEB / "settings.html").read_text(encoding="utf-8").replace(
+            "/*__DATA__*/null", json.dumps(payload).replace("</", "<\\/"))
+        self.send(HTTPStatus.BAD_REQUEST if error else HTTPStatus.OK, chart.PAGE.format(body=page),
+                  "text/html; charset=utf-8")
+
     # ---- routes --------------------------------------------------------------
+    def settings_page(self, query):
+        self.render_settings()
+
     def page(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
         strategy = strategy_from_query(query)
         cost_name, cost_model = costs_of(query)
-        payload = chart.build_payload(ticker, strategy, timeframe=timeframe_of(query),
-                                      costs=cost_model,
+        tf = timeframe_of(query)
+        payload = chart.build_payload(ticker, strategy, timeframe=tf,
+                                      costs=cost_model, history=history_of(query, tf),
                                       test_from=(query.get("test_from") or None) if strategy else None)
         # What the control bar needs: menus, and the current choice to pre-select
         payload["app"] = {
@@ -392,6 +469,7 @@ class Handler(BaseHTTPRequestHandler):
             "timeframes": TIMEFRAME_MENU,
             "costs": cost_menu(cost_name, cost_model),
             "tickers": universe.menu(dl.cached_tickers()),
+            "data": data_info(),
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
                   "text/html; charset=utf-8")
@@ -437,8 +515,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_backtest(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
+        tf = timeframe_of(query)
         self.send_json(chart.build_payload(ticker, strategy_from_query(query),
-                                           timeframe=timeframe_of(query),
+                                           timeframe=tf, history=history_of(query, tf),
                                            costs=costs_of(query)[1],
                                            test_from=query.get("test_from") or None))
 

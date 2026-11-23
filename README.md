@@ -21,6 +21,9 @@ There's no password, so only do this on your home network.
 pre-market and after-hours (4:00-20:00 New York). Free intraday history is short (5m: last
 60 days, 1h: last 2 years), so QuantLab keeps every download and your history grows.
 Any strategy can be set to **day trade** (flat outside 9:30-16:00) on intraday timeframes.
+**Years of intraday history:** connect a free [Alpaca](https://alpaca.markets) account on the
+app's **Data** page (paste the API key ID and secret; they stay on your computer). Then 5m-4h
+candles go back to 2016 instead of 60 days. Use the **History** menu to choose how much to load.
 **Costs:** pick Realistic (default), Flat 0.05%, No costs, Expensive or Custom; the stats table
 shows return before costs and the $ paid, so you see how much trading costs eat.
 
@@ -57,6 +60,7 @@ pytest -q
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
 | `quantlab/optimize.py` | Parameter sweep: every combination of settings, scored in-sample and out-of-sample; overfitting report; walk-forward (re-optimize each window, trade the next) |
 | `quantlab/scan.py` | Market scan: the same sweep on many tickers × timeframes; settings picked in-sample per market, compared out-of-sample; settings ranked across all markets |
+| `quantlab/alpaca.py` | Alpaca market data: years of 5m candles, saved and updated incrementally; keys kept in `alpaca_keys.json` (git-ignored) |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |

@@ -201,9 +201,11 @@ footer { color: var(--muted); font-size: 12px; }
       <input id="tickerIn" name="ticker" autocomplete="off" spellcheck="false" maxlength="16" required
              pattern="\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14}"></label>
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
+    <label class="field" id="histField" hidden title="How far back to load intraday candles"><span>History</span><select id="histIn" name="hist"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <button type="button" class="guide-btn" id="guideBtn" aria-expanded="false" aria-controls="guidePanel" hidden>ⓘ How it works</button>
     <a class="navlink" id="chartLink" href="/">← Chart</a>
+    <a class="navlink" href="/settings" title="Where the candles come from; connect Alpaca">Data</a>
     <input type="hidden" name="run" value="1">
   </form>
 
@@ -552,7 +554,19 @@ const TF = DATA.timeframe || "1d";
 const tfIn = document.getElementById("tfIn");
 tfIn.innerHTML = A.timeframes.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
 tfIn.value = TF;
+// History (intraday only). Empty = the default: per timeframe in a scan.
+const histIn = document.getElementById("histIn");
+const HIST_LABEL = Object.fromEntries(A.data.histories);
+histIn.innerHTML = `<option value="">Default (${DATA.intraday ? esc(HIST_LABEL[A.history]) : "per timeframe"})</option>` +
+  A.data.histories.map(([v, label]) => `<option value="${v}">${label}</option>`).join("");
+histIn.value = A.history_explicit;
+const histQuery = () => histIn.value ? `&hist=${histIn.value}` : "";
+histIn.addEventListener("change", () => {
+  if (document.getElementById("modeIn").value === "scan") return;      // used when the scan runs
+  location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + histQuery() + costQuery(A.costs);
+});
 tfIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${tfIn.value}&strategy=${sIn.value}` + costQuery(A.costs); });
+const chartHist = h => h ? `&hist=${h}` : "";
 // In "many markets" mode, keep the chosen tickers and timeframes when the page reloads
 const scanQuery = () => document.getElementById("modeIn").value !== "scan" ? "" :
   `&mode=scan&tickers=${encodeURIComponent(SCAN.tickers.join(","))}&tfs=${SCAN.tfs.join(",")}`;
@@ -562,7 +576,7 @@ const sweepable = A.strategies.filter(s => Object.keys(s.params).length);
 sIn.innerHTML = strategyOptions(sweepable);
 strategyNotice(A);
 sIn.value = S.id;
-sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + costQuery(A.costs) + scanQuery(); });
+sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + costQuery(A.costs) + scanQuery() + histQuery(); });
 document.getElementById("stratName").textContent = S.name;
 setupGuide(document.getElementById("guideBtn"), document.getElementById("guidePanel"), S, DATA.intraday);
 document.getElementById("splitIn").value = String(A.split);
@@ -625,6 +639,9 @@ function showMode() {
   document.getElementById("marketsBox").hidden = !sc;
   // one ticker / timeframe at the top only makes sense for a single market
   tIn.closest("label").hidden = sc; tfIn.closest("label").hidden = sc;
+  // History matters for intraday: always in a scan (it may include intraday timeframes)
+  document.getElementById("histField").hidden = !(sc || DATA.intraday);
+  histIn.options[0].textContent = sc ? "Default per timeframe" : `Default (${DATA.intraday ? HIST_LABEL[A.history] : "–"})`;
   document.getElementById("runBtn").textContent = wf ? "Run walk-forward" : sc ? "Run scan" : "Run sweep";
   A.max_combos = wf ? 2000 : 5000;
   if (typeof countCombos === "function") countCombos();
@@ -776,10 +793,10 @@ function drawScan(R) {
   const rangeQuery = () => params.map(([k]) => ["from", "to", "step"].map(x =>
     `&${k}_${x}=${encodeURIComponent(form.elements[`${k}_${x}`].value)}`).join("")).join("");
   const sweepUrl = m => `/optimize?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&mode=split&split=${R.split}&rank=${R.rank}` +
-    rangeQuery() + costQuery(A.costs) + "&run=1";
+    rangeQuery() + costQuery(A.costs) + chartHist(m.hist) + "&run=1";
   const chartUrl = m => `/?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&` +
     Object.entries(m.settings || {}).map(([k, v]) => `${k}=${v}`).join("&") + costQuery(A.costs) +
-    `&test_from=${encodeURIComponent(m.split)}`;
+    `&test_from=${encodeURIComponent(m.split)}` + chartHist(m.hist);
   const median = xs => { const v = xs.filter(x => x !== null).sort((a, b) => a - b); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; };
 
   // ---- Verdict ----
@@ -1032,7 +1049,8 @@ if (RES && RES.mode !== "wf") {
   const sign = M.better === "higher" ? -1 : 1;              // sort direction for "best first"
   // test_from: the chart then shows the training and test (unseen) periods separately
   const chartUrl = r => `/?ticker=${encodeURIComponent(DATA.ticker)}&tf=${TF}&strategy=${S.id}&` +
-    params.map(([k]) => `${k}=${r[k]}`).join("&") + costQuery(A.costs) + `&test_from=${encodeURIComponent(RES.split_at)}`;
+    params.map(([k]) => `${k}=${r[k]}`).join("&") + costQuery(A.costs) + `&test_from=${encodeURIComponent(RES.split_at)}` +
+    chartHist(A.history);
 
   // Verdict: did the in-sample winners hold up?
   const O = RES.report, v = document.getElementById("verdict");

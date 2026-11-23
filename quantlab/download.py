@@ -115,15 +115,16 @@ def load(ticker: str, adjusted: bool = True) -> pd.Series:
     return df[col].rename(ticker.upper())
 
 
-def load_bars(ticker: str, timeframe: str = "1d") -> pd.DataFrame:
+def load_bars(ticker: str, timeframe: str = "1d", history: str = None) -> pd.DataFrame:
     """Bars for strategies: open/high/low/close/volume.
 
     Daily ("1d"): adjusted for dividends and splits (the whole bar is scaled by
     Adj Close / Close, so every column is on the backtest's price basis).
     Intraday ("5m", "15m", "30m", "1h", "4h"): see load_intraday().
+    history: intraday only, how far back: "60d", "6m", "1y", "2y", "5y" or "all".
     """
     if timeframe != "1d":
-        return load_intraday(ticker, timeframe)
+        return load_intraday(ticker, timeframe, history)
     df = pd.read_csv(download(ticker), parse_dates=["Date"], index_col="Date")
     factor = df["Adj Close"] / df["Close"]
     bars = df[["Open", "High", "Low", "Close"]].mul(factor, axis=0)
@@ -268,13 +269,72 @@ def clean_spikes(df: pd.DataFrame, min_move: float = 0.02, factor: float = 10.0,
     return df
 
 
-def load_intraday(ticker: str, timeframe: str) -> pd.DataFrame:
+HISTORY = {"60d": 60, "6m": 183, "1y": 365, "2y": 730, "5y": 1826, "all": None}
+HISTORY_LABELS = {"60d": "Last 60 days", "6m": "Last 6 months", "1y": "Last year", "2y": "Last 2 years",
+                  "5y": "Last 5 years", "all": "All history"}
+RESAMPLE = {"15m": "15min", "30m": "30min", "1h": "1h", "4h": "4h"}
+_READ_CACHE = {}                       # path -> (modified time, DataFrame): big files read once
+
+
+def read_intraday_cached(path: Path) -> pd.DataFrame:
+    mtime = path.stat().st_mtime
+    hit = _READ_CACHE.get(path)
+    if hit is None or hit[0] != mtime:
+        if len(_READ_CACHE) > 12:          # keep memory in check
+            _READ_CACHE.pop(next(iter(_READ_CACHE)))
+        hit = _READ_CACHE[path] = (mtime, read_intraday(path))
+    return hit[1]
+
+
+def check_history(history) -> str:
+    if history in (None, ""):
+        return "all"
+    if history not in HISTORY:
+        raise ValueError(f"Unknown history {history!r}. Choose from: {', '.join(HISTORY)}")
+    return history
+
+
+def intraday_source(ticker: str) -> str:
+    """'alpaca' when Alpaca keys are set (and it's not an index), else 'yahoo'."""
+    from . import alpaca
+    return "alpaca" if alpaca.enabled() and not clean_ticker(ticker).startswith("^") else "yahoo"
+
+
+def load_intraday(ticker: str, timeframe: str, history: str = None) -> pd.DataFrame:
     """Intraday bars (pre-market and after-hours included), New York time.
 
-    Prices are as traded: not adjusted for dividends (Yahoo doesn't adjust
-    intraday data), which matters little over weeks or months.
+    With Alpaca keys: years of 5m candles (since 2016), adjusted for splits and
+    dividends; every timeframe is built from them. Without: Yahoo's recent
+    history, prices as traded (Yahoo doesn't adjust intraday data).
+    history: keep only the last 60d / 6m / 1y / 2y / 5y, or "all".
     """
     check_timeframe(timeframe)
+    days = HISTORY[check_history(history)]
+    if intraday_source(ticker) == "alpaca":
+        from . import alpaca
+        try:
+            raw = read_intraday_cached(alpaca.download(ticker))
+        except alpaca.AlpacaError as e:
+            if "no 5-minute data" not in str(e) and "index" not in str(e):
+                raise
+            print(f"  note: {e} Using Yahoo instead.")
+        else:
+            if days:
+                raw = raw[raw.index >= raw.index[-1] - pd.Timedelta(days=days)]
+            raw = clean_spikes(raw)
+            df = raw if timeframe == "5m" else resample_bars(raw, RESAMPLE[timeframe])
+            bars = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+            bars.columns = [c.lower() for c in bars.columns]
+            bars.attrs.update(spikes_trimmed=raw.attrs["spikes_trimmed"], source="alpaca", adjusted=True)
+            return bars
+    bars = _load_yahoo_intraday(ticker, timeframe)
+    if days and len(bars):
+        bars = bars[bars.index >= bars.index[-1] - pd.Timedelta(days=days)]
+    bars.attrs.update(source="yahoo", adjusted=False)
+    return bars
+
+
+def _load_yahoo_intraday(ticker: str, timeframe: str) -> pd.DataFrame:
     source = TIMEFRAMES[timeframe][0]
     if source.startswith("from:"):
         _, base, rule = source.split(":")

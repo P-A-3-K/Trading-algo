@@ -6,3 +6,4 @@ data/
 *.bundle
 reports/
 .venv/
+alpaca_keys.json

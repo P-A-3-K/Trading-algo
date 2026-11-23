@@ -222,10 +222,11 @@ def split_index(index: pd.DatetimeIndex, test_from) -> int:
 
 
 MIN_PERIOD_BARS = 20
+MAX_CHART_BARS = 80_000              # more than this makes the page too heavy for a browser
 
 
 def build_payload(ticker: str, strategy=None, adjusted: bool = True,
-                  timeframe: str = "1d", costs=None, test_from=None) -> dict:
+                  timeframe: str = "1d", costs=None, test_from=None, history: str = None) -> dict:
     """Everything the chart page shows, for one ticker, timeframe and optional strategy.
 
     test_from: where the optimizer's test (out-of-sample) period started, when the
@@ -239,11 +240,16 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
     ticker = dl.clean_ticker(ticker)
     dl.check_timeframe(timeframe)
     intraday = timeframe != "1d"
+    source = "yahoo"
     if intraday:
-        bars = dl.load_bars(ticker, timeframe)
+        bars = dl.load_bars(ticker, timeframe, history)
+        if len(bars) > MAX_CHART_BARS:
+            raise ValueError(f"That's {len(bars):,} candles: too many to draw. Pick a shorter History "
+                             f"(the Optimize page can use all of it).")
+        source = bars.attrs.get("source", "yahoo")
         df = bars.rename(columns=str.capitalize)
-        df["Adj Close"] = df["Close"]          # intraday prices are as traded
-        adjusted = False
+        df["Adj Close"] = df["Close"]          # already on the backtest's price basis
+        adjusted = bool(bars.attrs.get("adjusted"))
     else:
         df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
     bpd = bars_per_day(df.index)
@@ -293,7 +299,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
             "costs": costs.describe() if (strategy is not None and costs) else "",
             "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,
-            "is_index": ticker.startswith("^"),
+            "is_index": ticker.startswith("^"), "source": source, "history": history if intraday else None,
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
             "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck,
             "split": split, "periods": periods}

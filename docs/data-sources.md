@@ -51,4 +51,27 @@ We will handle this in the Data checks / Validation lessons.
 - **Bad prints:** thin after-hours trading produces wicks like a 6% drop on a bar whose
   open and close are equal. `clean_spikes()` trims wicks that stick out >2% beyond the body
   and >10x the typical range of the previous 50 bars (only past bars are used).
-- Next: Alpaca's free data API for years of 1-minute history.
+
+## Alpaca (years of intraday history, free account)
+
+With Alpaca keys (Data page in the app, or `APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`), every
+intraday timeframe comes from Alpaca instead of Yahoo:
+
+| | Yahoo (no keys) | Alpaca (free keys) |
+|---|---|---|
+| 5m-30m history | ~60 days | since 2016 |
+| 1h-4h history | ~2 years | since 2016 |
+| Exchanges | consolidated | all US exchanges (SIP); IEX only if the plan refuses SIP |
+| Adjusted | no | splits and dividends (`adjustment=all`), like the daily data |
+| Latest bars | live-ish | 15 minutes delayed (free plan) |
+
+- One file per ticker: `data/alpaca/5m/<TICKER>.csv`. 15m, 30m, 1h and 4h are built from it,
+  so all timeframes agree. Each use fetches only the bars since the last download; when a new
+  dividend re-adjusts the past, the whole history is downloaded again (~50 requests).
+- First download per ticker: about a minute or two (`python -m quantlab.alpaca SPY` shows progress).
+- Indices (^GSPC) still come from Yahoo: Alpaca has stocks and ETFs only.
+- **History** menu: intraday pages load only the last N months/years. The chart has to draw every
+  candle (5m defaults to 6 months), sweeps only compute (5m defaults to 1 year); "All history"
+  is there when you want it.
+- Endpoint: `GET https://data.alpaca.markets/v2/stocks/bars` with headers `APCA-API-KEY-ID` /
+  `APCA-API-SECRET-KEY`, 10,000 bars per page (`next_page_token`).

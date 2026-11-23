@@ -1,0 +1,139 @@
+<title>QuantLab Data</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Data page: where candles come from, and the Alpaca keys form. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #15191f; --muted: #5d6673; --line: #dfe3e8;
+  --grid: #eceff3; --up: #12855f; --down: #c8423b; --accent: #2f5fd0; --warn: #a86200;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff; --warn: #f0a63a; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1216; --panel: #151a20; --fg: #e6e9ee; --muted: #8b95a3; --line: #262d36;
+  --grid: #1c2229; --up: #2fbf8a; --down: #ef6a61; --accent: #7aa2ff; --warn: #f0a63a; color-scheme: dark; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); }
+.wrap { box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; max-width: 860px; margin: 0 auto;
+  padding-block: 16px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.brand { font: 600 15px/1 var(--sans); letter-spacing: .02em; }
+a { color: var(--accent); }
+.navlink { font: 500 13px/1 var(--mono); }
+h1 { margin: 0; font: 600 22px/1.25 var(--sans); }
+h2 { margin: 0 0 8px; font: 600 16px/1.3 var(--sans); }
+p { margin: 6px 0; max-width: 70ch; }
+.muted { color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+th { font: 500 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+td.mono { font-family: var(--mono); }
+.ok { color: var(--up); font-weight: 600; } .no { color: var(--warn); font-weight: 600; }
+ol { margin: 6px 0 10px; padding-left: 22px; } li { margin: 4px 0; }
+form[hidden] { display: none; }
+form { display: grid; gap: 12px; max-width: 520px; margin-top: 12px; }
+label { display: flex; flex-direction: column; gap: 4px; }
+label span { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+input { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 9px 10px; min-width: 0; }
+input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+button { font: 500 13px/1 var(--mono); color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 14px; cursor: pointer; }
+button:hover { color: var(--fg); }
+button.primary { color: var(--panel); background: var(--accent); border-color: var(--accent); }
+button.danger:hover { color: var(--down); border-color: var(--down); }
+.msg { border: 1px solid var(--line); border-left: 4px solid var(--up); border-radius: 8px; padding: 10px 14px; background: var(--panel); }
+.msg.err { border-left-color: var(--down); }
+.msg[hidden] { display: none; }
+.tablewrap { overflow-x: auto; }
+code { font-family: var(--mono); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <div class="card top"><span class="brand">QuantLab</span>
+    <a class="navlink" href="/">← Chart</a><a class="navlink" href="/optimize">Optimize</a></div>
+  <div class="msg" id="msg" role="status" hidden></div>
+
+  <section class="card">
+    <h1>Data sources</h1>
+    <div class="tablewrap"><table style="margin-top:10px">
+      <thead><tr><th>Candles</th><th>From</th><th>History</th></tr></thead>
+      <tbody id="sources"></tbody>
+    </table></div>
+  </section>
+
+  <section class="card" aria-labelledby="alpacaTitle">
+    <h2 id="alpacaTitle">Alpaca: years of intraday candles, free</h2>
+    <div id="status"></div>
+    <div id="setup">
+      <ol>
+        <li>Make a free account at <a href="https://alpaca.markets" target="_blank" rel="noopener">alpaca.markets</a> (no deposit needed).</li>
+        <li>In the dashboard, open <b>Paper Trading</b> and find <b>API Keys</b> (on the home page, right side). Click <b>Generate New Keys</b>.</li>
+        <li>Copy the <b>API Key ID</b> and the <b>Secret Key</b> into the boxes below. Alpaca shows the secret only once, so keep the page open until you've saved.</li>
+      </ol>
+    </div>
+    <form method="post" action="/settings" id="keysForm" autocomplete="off">
+      <input type="hidden" name="action" value="save">
+      <label><span>API Key ID</span><input name="key_id" id="keyId" required maxlength="100" spellcheck="false" placeholder="PK…"></label>
+      <label><span>Secret Key</span><input name="secret" type="password" required maxlength="200" spellcheck="false"></label>
+      <div class="buttons"><button class="primary" type="submit" id="saveBtn">Save &amp; test</button></div>
+    </form>
+    <form method="post" action="/settings" id="removeForm" hidden>
+      <input type="hidden" name="action" value="delete">
+      <div class="buttons"><button class="danger" type="submit">Remove keys</button></div>
+    </form>
+    <p class="muted" style="margin-top:14px">The keys are saved in <code>alpaca_keys.json</code> in your QuantLab folder.
+      Git ignores that file, so it's never uploaded; QuantLab only sends the keys to Alpaca. Market data works with paper-trading keys:
+      nothing here can place trades.</p>
+  </section>
+
+  <section class="card" id="savedCard" hidden>
+    <h2>Downloaded from Alpaca</h2>
+    <p class="muted">5-minute candles; 15m, 30m, 1h and 4h are built from them. Each use only adds the newest bars.
+      To download ahead of time: <code>python -m quantlab.alpaca SPY QQQ</code></p>
+    <div class="tablewrap"><table><thead><tr><th>Ticker</th><th>From</th><th>To</th><th>Size</th></tr></thead><tbody id="saved"></tbody></table></div>
+  </section>
+</div>
+
+<script>
+const DATA = /*__DATA__*/null;
+const esc = t => String(t).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+const A = DATA.alpaca;
+const msg = document.getElementById("msg");
+if (DATA.message) { msg.textContent = DATA.message; msg.classList.toggle("err", !!DATA.error); msg.hidden = false; }
+document.getElementById("sources").innerHTML =
+  `<tr><td>Daily</td><td>Yahoo Finance</td><td>Since 1993 (or the ticker's first day), adjusted for dividends &amp; splits</td></tr>` +
+  (A.enabled
+    ? `<tr><td>5m – 4h</td><td class="ok">Alpaca ✓</td><td>Since 2016, adjusted for dividends &amp; splits, ${A.feed === "iex" ? "IEX exchange only" : "all US exchanges"}</td></tr>`
+    : `<tr><td>5m – 4h</td><td class="no">Yahoo Finance</td><td>5m–30m: last 60 days · 1h–4h: last 2 years (add Alpaca keys below for years more)</td></tr>`) +
+  `<tr><td>Indices (^GSPC…)</td><td>Yahoo Finance</td><td>Alpaca only has stocks and ETFs</td></tr>`;
+const status = document.getElementById("status");
+if (A.enabled) {
+  status.innerHTML = `<p><span class="ok">Connected.</span> Key <code>${esc(A.key)}</code>` +
+    (A.from === "environment" ? ` (from the APCA_API_KEY_ID / APCA_API_SECRET_KEY environment variables)` : "") +
+    `. Intraday charts, sweeps and scans now use Alpaca's history. To change keys, paste new ones below.</p>`;
+  document.getElementById("setup").hidden = true;
+  document.getElementById("saveBtn").textContent = "Replace & test";
+  document.getElementById("removeForm").hidden = A.from !== "file";
+} else {
+  status.innerHTML = `<p>Not connected. Yahoo only keeps 60 days of 5-minute candles, too little to test a strategy properly.
+    With a free Alpaca account QuantLab downloads every 5-minute candle since 2016.</p>`;
+}
+if (DATA.key_id) document.getElementById("keyId").value = DATA.key_id;
+if (!DATA.local) {
+  for (const f of document.querySelectorAll("form")) f.hidden = true;
+  status.insertAdjacentHTML("beforeend", `<p class="no">Keys can only be changed on the computer running QuantLab, not from a phone.</p>`);
+}
+document.getElementById("keysForm").addEventListener("submit", () => {
+  const b = document.getElementById("saveBtn"); b.disabled = true; b.textContent = "Testing…";
+});
+if (DATA.saved.length) {
+  document.getElementById("savedCard").hidden = false;
+  document.getElementById("saved").innerHTML = DATA.saved.map(r =>
+    `<tr><td class="mono"><a href="/?ticker=${encodeURIComponent(r.ticker)}&tf=5m">${esc(r.ticker)}</a></td><td>${esc(r.first)}</td><td>${esc(r.last)}</td><td>${esc(r.size)}</td></tr>`).join("");
+}
+</script>

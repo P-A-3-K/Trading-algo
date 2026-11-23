@@ -11,7 +11,8 @@ def test_text_io_names_an_encoding():
     offenders = []
     for path in list((ROOT / "quantlab").rglob("*.py")) + list((ROOT / "lessons").glob("*.py")):
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if CALL.search(line) and "encoding=" not in line and "webbrowser.open" not in line:
+            binary = re.search(r"""open\([^)]*["']\w*b\w*["']""", line)   # bytes: no encoding involved
+            if CALL.search(line) and "encoding=" not in line and "webbrowser.open" not in line and not binary:
                 offenders.append(f"{path.relative_to(ROOT)}:{n}: {line.strip()}")
     assert not offenders, "\n".join(offenders)
 
