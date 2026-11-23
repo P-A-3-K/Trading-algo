@@ -91,7 +91,7 @@ class SweepResult:
 
 
 def sweep(bars: pd.DataFrame, cls, ranges: dict, split: float = 0.7,
-          cost_bps: float = 5.0) -> SweepResult:
+          cost_bps: float = 5.0, costs=None) -> SweepResult:
     """Backtest every combination in `ranges` and score it in-sample and out-of-sample."""
     if not 0.3 <= split <= 0.95:
         raise ValueError("in-sample share must be between 30% and 95%")
@@ -99,20 +99,21 @@ def sweep(bars: pd.DataFrame, cls, ranges: dict, split: float = 0.7,
     cut = int(len(bars) * split)
     split_date = bars.index[cut]
     rows, skipped = [], []
+    prepared = costs.prepare(bars) if costs is not None else None   # once, not per combination
     for settings in grid(cls, ranges):
         try:
             strategy = cls(**settings)
         except ValueError as e:                 # e.g. fast >= slow
             skipped.append((settings, str(e)))
             continue
-        bt = simulate(bars, strategy.run(bars), cost_bps)
+        bt = simulate(bars, strategy.run(bars), cost_bps, prepared)
         row = dict(settings)
         row.update(segment_stats(bt.returns.iloc[:cut], bt.positions.iloc[:cut], "is"))
         # OOS starts flat-or-holding exactly as the strategy was: no fresh entry cost
         row.update(segment_stats(bt.returns.iloc[cut:], bt.positions.iloc[cut:], "oos"))
         rows.append(row)
     table = pd.DataFrame(rows)
-    bh = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), cost_bps)
+    bh = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), cost_bps, prepared)
     bench = {**segment_stats(bh.returns.iloc[:cut], bh.positions.iloc[:cut], "is"),
              **segment_stats(bh.returns.iloc[cut:], bh.positions.iloc[cut:], "oos")}
     if len(table):
@@ -188,7 +189,7 @@ class WalkForwardResult:
 
 def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
                  test_years: float = 2, anchored: bool = False, rank: str = "sharpe",
-                 cost_bps: float = 5.0) -> WalkForwardResult:
+                 cost_bps: float = 5.0, costs=None) -> WalkForwardResult:
     """Re-optimize on each training window, trade the winner on the next test window.
 
     rolling (default): every training window is `train_years` long.
@@ -220,8 +221,9 @@ def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
                          f"(max {WF_MAX_COMBINATIONS:,}). Use bigger steps.")
     R = np.empty((len(combos), n))
     H = np.empty((len(combos), n))
+    prepared = costs.prepare(bars) if costs is not None else None
     for j, (_, strategy) in enumerate(combos):
-        bt = simulate(bars, strategy.run(bars), cost_bps)
+        bt = simulate(bars, strategy.run(bars), cost_bps, prepared)
         R[j], H[j] = bt.returns.to_numpy(), bt.positions.to_numpy()
 
     idx = bars.index
@@ -254,7 +256,7 @@ def walk_forward(bars: pd.DataFrame, cls, ranges: dict, train_years: float = 8,
     span = idx[first:]
     hind = _metric(R[:, first:], H[:, first:], rank, ppy)
     hbest = int(np.nanargmax(np.where(np.isfinite(hind), hind, -np.inf)))
-    bh = run_backtest(bars["close"], pd.Series(1.0, index=idx), cost_bps).returns.iloc[first:]
+    bh = run_backtest(bars["close"], pd.Series(1.0, index=idx), cost_bps, prepared).returns.iloc[first:]
     return WalkForwardResult(
         folds, pd.Series(wf_r[first:], index=span), pd.Series(wf_h[first:], index=span),
         bh, pd.Series(R[hbest, first:], index=span), dict(combos[hbest][0]),

@@ -15,6 +15,7 @@ class BacktestResult:
     trades: int             # number of position changes
     plots: list = None      # lines the strategy asked to draw (if any)
     strategy: str = ""
+    costs: pd.Series = None # trading costs paid each bar (fraction of the account)
 
     def summary(self) -> dict:
         s = metrics.summarize(self.returns)
@@ -23,11 +24,12 @@ class BacktestResult:
 
 
 def run_backtest(prices: pd.Series, positions: pd.Series,
-                 cost_bps: float = 5.0) -> BacktestResult:
+                 cost_bps: float = 5.0, costs=None) -> BacktestResult:
     """Vectorized daily backtest.
 
     cost_bps: cost per unit of position change, in basis points
     (1 bp = 0.01%). Covers commission + bid/ask spread + slippage.
+    costs: a PreparedCosts (quantlab.costs) to use instead of the flat cost_bps.
     """
     asset_returns = prices.pct_change().fillna(0.0)
 
@@ -37,12 +39,17 @@ def run_backtest(prices: pd.Series, positions: pd.Series,
     held = positions.shift(1).fillna(0.0)
 
     turnover = held.diff().abs().fillna(held.abs())
-    costs = turnover * cost_bps / 10_000
+    if costs is None:
+        paid = turnover * cost_bps / 10_000
+    else:
+        # the trade happens at the close of the bar BEFORE the position changes
+        exec_bar = np.maximum(np.arange(len(turnover)) - 1, 0)
+        paid = pd.Series(costs(exec_bar, turnover.to_numpy()), index=turnover.index)
 
-    strat_returns = held * asset_returns - costs
+    strat_returns = held * asset_returns - paid
     equity = (1 + strat_returns).cumprod()
     trades = int((turnover > 0).sum())
-    return BacktestResult(equity, strat_returns, held, trades)
+    return BacktestResult(equity, strat_returns, held, trades, costs=paid)
 
 
 def backtest(strategy, bars: pd.DataFrame, cost_bps: float = 5.0) -> BacktestResult:
@@ -101,7 +108,8 @@ def held_positions(index: pd.DatetimeIndex, trades: list) -> pd.Series:
     return held
 
 
-def simulate_trades(bars: pd.DataFrame, trades: list, cost_bps: float = 5.0) -> BacktestResult:
+def simulate_trades(bars: pd.DataFrame, trades: list, cost_bps: float = 5.0,
+                    costs=None) -> BacktestResult:
     """Daily returns from trades filled at exact prices.
 
     Entry day earns close/entry, days in between close/previous close, the exit
@@ -111,23 +119,31 @@ def simulate_trades(bars: pd.DataFrame, trades: list, cost_bps: float = 5.0) -> 
     close = bars["close"].to_numpy(dtype=float)
     idx = bars.index
     r = np.zeros(len(idx))
-    cost = cost_bps / 10_000
+    paid = np.zeros(len(idx))
+    fee = (lambda i, size: size * cost_bps / 10_000) if costs is None else costs
     for t in trades:
         i0 = idx.get_loc(t.entry_date)
         w = t.side * t.size
-        r[i0] -= t.size * cost
+        c_in = float(fee(i0, t.size))
+        r[i0] -= c_in
+        paid[i0] += c_in
         if t.exit_date is not None and idx.get_loc(t.exit_date) == i0:
-            r[i0] += w * (t.exit_price / t.entry_price - 1) - t.size * cost
+            c_out = float(fee(i0, t.size))
+            r[i0] += w * (t.exit_price / t.entry_price - 1) - c_out
+            paid[i0] += c_out
             continue
         r[i0] += w * (close[i0] / t.entry_price - 1)
         i1 = idx.get_loc(t.exit_date) if t.exit_date is not None else len(idx)
         if i1 > i0 + 1:
             r[i0 + 1:i1] += w * (close[i0 + 1:i1] / close[i0:i1 - 1] - 1)
         if t.exit_date is not None:
-            r[i1] += w * (t.exit_price / close[i1 - 1] - 1) - t.size * cost
+            c_out = float(fee(i1, t.size))
+            r[i1] += w * (t.exit_price / close[i1 - 1] - 1) - c_out
+            paid[i1] += c_out
     returns = pd.Series(r, index=idx)
     fills = sum(1 if t.exit_date is None else 2 for t in trades)
-    return BacktestResult((1 + returns).cumprod(), returns, held_positions(idx, trades), fills)
+    return BacktestResult((1 + returns).cumprod(), returns, held_positions(idx, trades), fills,
+                          costs=pd.Series(paid, index=idx))
 
 
 def trade_fills(trades: list) -> pd.DataFrame:
@@ -143,11 +159,15 @@ def trade_fills(trades: list) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["date", "side", "from", "to", "price"])
 
 
-def simulate(bars: pd.DataFrame, out, cost_bps: float = 5.0) -> BacktestResult:
-    """Backtest a StrategyResult: trade-based if it has trades, else position-based."""
+def simulate(bars: pd.DataFrame, out, cost_bps: float = 5.0, costs=None) -> BacktestResult:
+    """Backtest a StrategyResult: trade-based if it has trades, else position-based.
+
+    costs: a CostModel (quantlab.costs); without it a flat cost_bps per trade is used.
+    """
+    prepared = costs.prepare(bars) if hasattr(costs, "prepare") else costs
     if out.trades is not None:
-        return simulate_trades(bars, out.trades, cost_bps)
-    return run_backtest(bars["close"], out.positions, cost_bps)
+        return simulate_trades(bars, out.trades, cost_bps, prepared)
+    return run_backtest(bars["close"], out.positions, cost_bps, prepared)
 
 
 def fills_of(bars: pd.DataFrame, out) -> pd.DataFrame:

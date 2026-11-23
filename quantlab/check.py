@@ -61,8 +61,10 @@ def main(argv=None) -> int:
             ok = False
             print(f"  FAIL  crashed on {ticker}: {type(e).__name__}: {e}")
             continue
-        bt = simulate(bars, out)
-        bh = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
+        from .costs import CostModel
+        prepared = CostModel().prepare(bars)            # the app's default "realistic" costs
+        bt = simulate(bars, out, costs=prepared)
+        bh = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), costs=prepared)
         n = len(fills_of(bars, out))
         s, b = full_stats(bt.returns, bt.positions, n), full_stats(bh.returns, bh.positions, 1)
         span = f"{bars.index[0].date()} to {bars.index[-1].date()}"

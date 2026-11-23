@@ -118,7 +118,8 @@ def equity_payload(strategy_returns: pd.Series, benchmark_returns: pd.Series,
 # (key, label, explanation, format, which is better)
 STAT_ROWS = [
     ("final_value", "Final value", "What $10,000 grew to", "money", "higher"),
-    ("cagr", "Return per year", "Compound annual growth (CAGR)", "pct", "higher"),
+    ("cagr", "Return per year", "Compound annual growth (CAGR), after costs", "pct", "higher"),
+    ("cagr_gross", "Return per year before costs", "The same trades if trading were free", "pct", "higher"),
     ("volatility", "Volatility", "How much it swings, per year", "pct", "lower"),
     ("sharpe", "Sharpe ratio", "Return per unit of risk; above 1 is good", "num", "higher"),
     ("sortino", "Sortino ratio", "Like Sharpe, but only falls count as risk", "num", "higher"),
@@ -127,6 +128,7 @@ STAT_ROWS = [
     ("calmar", "Calmar ratio", "Return per year ÷ worst drawdown", "num", "higher"),
     ("time_in_market", "Time in market", "Share of days holding a position", "pct", None),
     ("fills", "Trades", "Buy and sell orders", "int", None),
+    ("costs_paid", "Costs paid", "Commission, spread, slippage and impact, in $", "money", "lower"),
     ("win_rate", "Win rate", "Share of round trips that made money", "pct", None),
     ("avg_win", "Average win", "Mean return of winning round trips", "pct", None),
     ("avg_loss", "Average loss", "Mean return of losing round trips", "pct", None),
@@ -192,8 +194,16 @@ PAGE = """<!doctype html>
 """
 
 
+def cost_summary(bt, start: float = START_CAPITAL) -> dict:
+    """Return per year before costs, and total $ paid in costs (from a BacktestResult)."""
+    from .metrics import cagr
+    paid = bt.costs if bt.costs is not None else pd.Series(0.0, index=bt.returns.index)
+    equity_before = start * bt.equity.shift(1).fillna(1.0)
+    return {"cagr_gross": cagr(bt.returns + paid), "costs_paid": float((paid * equity_before).sum())}
+
+
 def build_payload(ticker: str, strategy=None, adjusted: bool = True,
-                  timeframe: str = "1d") -> dict:
+                  timeframe: str = "1d", costs=None) -> dict:
     """Everything the chart page shows, for one ticker, timeframe and optional strategy.
 
     Used both for saved report files and by the web app (quantlab.app).
@@ -218,11 +228,14 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
             bars = dl.load_bars(ticker)
         out = strategy.run(bars)
         plots, fills = out.plots, fills_of(bars, out)
-        strat = simulate(bars, out)
-        bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index))
+        from .costs import CostModel
+        costs = costs or CostModel()
+        prepared = costs.prepare(bars)
+        strat = simulate(bars, out, costs=prepared)
+        bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), costs=prepared)
         equity = equity_payload(strat.returns, bench.returns)
-        s_st = full_stats(strat.returns, strat.positions, len(fills))
-        b_st = full_stats(bench.returns, bench.positions, 1)
+        s_st = {**full_stats(strat.returns, strat.positions, len(fills)), **cost_summary(strat)}
+        b_st = {**full_stats(bench.returns, bench.positions, 1), **cost_summary(bench)}
         for st in (s_st, b_st):                    # bar counts -> trading days
             for k in ("longest_drawdown_days", "avg_days_held"):
                 if st.get(k) is not None:
@@ -232,6 +245,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
         label = repr(strategy)
         adjusted = adjusted if intraday else True  # daily strategies run on adjusted bars
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
+            "costs": costs.describe() if (strategy is not None and costs) else "",
             "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
             "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck}

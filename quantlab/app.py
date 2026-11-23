@@ -98,6 +98,36 @@ def clean(v):
     return None if math.isnan(v) or math.isinf(v) else v
 
 
+COST_FIELDS = {"c_comm": "commission_bps", "c_spread": "spread_bps", "c_ext": "extended_spread_bps",
+               "c_slip": "slippage_range", "c_impact": "impact", "c_account": "account"}
+
+
+def costs_of(query: dict):
+    """(preset name, CostModel) from the address: cost=realistic|flat5|none|expensive|custom."""
+    from .costs import PRESETS, CostModel
+    name = query.get("cost") or "realistic"
+    if name == "custom":
+        base = CostModel().as_dict()
+        for q, field in COST_FIELDS.items():
+            if query.get(q, "") != "":
+                try:
+                    base[field] = float(query[q])
+                except ValueError:
+                    raise ValueError(f"cost setting {field} must be a number, got {query[q]!r}")
+                if base[field] < 0:
+                    raise ValueError(f"cost setting {field} can't be negative")
+        return name, CostModel(**base)
+    if name not in PRESETS:
+        raise ValueError(f"Unknown cost preset {name!r}. Choose from: {', '.join(PRESETS)}, custom")
+    return name, PRESETS[name]
+
+
+def cost_menu(name: str, model) -> dict:
+    from .costs import PRESETS
+    return {"preset": name, "values": {q: getattr(model, f) for q, f in COST_FIELDS.items()},
+            "presets": {k: {q: getattr(m, f) for q, f in COST_FIELDS.items()} for k, m in PRESETS.items()}}
+
+
 def timeframe_of(query: dict) -> str:
     return dl.check_timeframe(query.get("tf") or "1d")
 
@@ -128,7 +158,9 @@ def optimize_payload(ticker: str, query: dict) -> dict:
           "train": float(query.get("train", 20 if intraday else 8)),
           "test": float(query.get("test", 5 if intraday else 2)),
           "anchored": query.get("window") == "anchored"}
+    cost_name, cost_model = costs_of(query)
     app = {"strategy": cls.__name__, "strategies": strategies_info(), "errors": strategy_errors(),
+           "costs": cost_menu(cost_name, cost_model),
            "tickers": dl.cached_tickers(), "ranges": ranges, "split": split,
            "rank": rank, "mode": mode, "wf": wf,
            "max_combos": optimize.WF_MAX_COMBINATIONS if mode == "wf" else optimize.MAX_COMBINATIONS}
@@ -139,12 +171,13 @@ def optimize_payload(ticker: str, query: dict) -> dict:
         per_year = 252 if wf["unit"] == "days" else 1        # days -> years
         res = optimize.walk_forward(bars, cls, {k: tuple(v) for k, v in ranges.items()},
                                     wf["train"] / per_year, wf["test"] / per_year,
-                                    wf["anchored"], rank)
+                                    wf["anchored"], rank, costs=cost_model)
         payload["result"] = walk_forward_payload(res, rank)
         return payload
     if query.get("run"):
         bars = dl.load_bars(ticker, tf)
-        res = optimize.sweep(bars, cls, {k: tuple(v) for k, v in ranges.items()}, split)
+        res = optimize.sweep(bars, cls, {k: tuple(v) for k, v in ranges.items()}, split,
+                             costs=cost_model)
         if res.table.empty:
             raise ValueError("No valid combinations: " + (res.skipped[0][1] if res.skipped else "empty grid"))
         varied = [k for k, (a, b, _) in ranges.items() if b > a]
@@ -244,7 +277,9 @@ class Handler(BaseHTTPRequestHandler):
     def page(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
         strategy = strategy_from_query(query)
-        payload = chart.build_payload(ticker, strategy, timeframe=timeframe_of(query))
+        cost_name, cost_model = costs_of(query)
+        payload = chart.build_payload(ticker, strategy, timeframe=timeframe_of(query),
+                                      costs=cost_model)
         # What the control bar needs: menus, and the current choice to pre-select
         payload["app"] = {
             "strategy": type(strategy).__name__ if strategy else "none",
@@ -252,6 +287,7 @@ class Handler(BaseHTTPRequestHandler):
             "strategies": strategies_info(),
             "errors": strategy_errors(),
             "timeframes": TIMEFRAME_MENU,
+            "costs": cost_menu(cost_name, cost_model),
             "tickers": dl.cached_tickers(),
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
@@ -275,7 +311,8 @@ class Handler(BaseHTTPRequestHandler):
     def api_backtest(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER
         self.send_json(chart.build_payload(ticker, strategy_from_query(query),
-                                           timeframe=timeframe_of(query)))
+                                           timeframe=timeframe_of(query),
+                                           costs=costs_of(query)[1]))
 
     def no_content(self, query):
         self.send_response(HTTPStatus.NO_CONTENT)

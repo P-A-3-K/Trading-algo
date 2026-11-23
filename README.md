@@ -16,6 +16,8 @@ To get the newest version and start: double-click **`update.bat`** (or `./update
 pre-market and after-hours (4:00-20:00 New York). Free intraday history is short (5m: last
 60 days, 1h: last 2 years), so QuantLab keeps every download and your history grows.
 Any strategy can be set to **day trade** (flat outside 9:30-16:00) on intraday timeframes.
+**Costs:** pick Realistic (default), Flat 0.05%, No costs, Expensive or Custom; the stats table
+shows return before costs and the $ paid, so you see how much trading costs eat.
 
 Needs Python 3.10+ ([python.org](https://www.python.org/downloads/), tick
 "Add python.exe to PATH" on Windows) and, for updates, Git.
@@ -43,6 +45,7 @@ pytest -q
 | `quantlab/checks.py` | Find missing and stale trading days; fill short gaps safely |
 | `quantlab/optimize.py` | Parameter sweep: every combination of settings, scored in-sample and out-of-sample; overfitting report; walk-forward (re-optimize each window, trade the next) |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
+| `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |
 | `quantlab/chart.py` | Interactive candlestick chart page (TradingView Lightweight Charts, bundled in `quantlab/web/vendor`) |
 | `quantlab/data.py` | Prices, returns, random walks (synthetic data = a "no edge" control group) |

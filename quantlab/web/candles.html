@@ -109,6 +109,8 @@ table.stats { width: 100%; border-collapse: collapse; font-size: 13px; }
   padding: 10px 14px; font-size: 13px; }
 .notice-box ul { margin: 6px 0 0; padding-left: 18px; }
 .notice-box code { font-family: var(--mono); }
+.costFields { display: contents; }
+.costFields[hidden] { display: none !important; }
 .navlink { align-self: center; font: 500 13px/1 var(--mono); color: var(--accent); }
 .desc { flex: 1 1 260px; min-width: 0; align-self: center; color: var(--muted); font-size: 13px; }
 footer { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; }
@@ -126,6 +128,7 @@ footer a { color: inherit; }
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <span id="settingsIn" class="params"></span>
+    <span id="costsIn" class="params"></span>
     <button type="submit" class="run" id="runBtn">Run</button>
     <button type="button" id="resetBtn" hidden title="Put every setting back to the strategy's default">Reset</button>
     <a class="navlink" id="optLink" href="/optimize" title="Try every combination of this strategy's settings">Optimize →</a>
@@ -253,6 +256,7 @@ if (fills.length) {
 if (DATA.strategy) {
   const tag = document.getElementById("strategy");
   tag.textContent = DATA.strategy; tag.hidden = false;
+  if (DATA.costs) { tag.title = "Costs: " + DATA.costs; tag.textContent += "  ·  costs: " + DATA.costs; }
 }
 
 function paint() {
@@ -437,6 +441,37 @@ function strategyNotice(app) {
   el.hidden = false;
 }
 
+
+
+// Keep the cost choice when moving between pages
+function costQuery(C) {
+  if (!C) return "";
+  if (C.preset !== "custom") return `&cost=${C.preset}`;
+  return "&cost=custom" + Object.entries(C.values).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join("");
+}
+// Costs menu: presets, or Custom with each setting (shared by chart and optimizer pages)
+function costControls(slot, C, formId, onPreset) {
+  const NAMES = { realistic: "Realistic", flat5: "Flat 0.05% per trade", none: "No costs", expensive: "Expensive (small stocks)", custom: "Custom…" };
+  const FIELDS = [["c_comm", "Commission (bp)"], ["c_spread", "Spread (bp)"], ["c_ext", "Spread outside 9:30-16 (bp)"],
+                  ["c_slip", "Slippage (x bar range)"], ["c_impact", "Impact factor"], ["c_account", "Account ($)"]];
+  const f = formId ? ` form="${formId}"` : "";
+  slot.innerHTML = `<label class="field" title="What each trade costs beyond the chart price"><span>Costs</span><select name="cost"${f} class="costSel">` +
+    Object.entries(NAMES).map(([k, v]) => `<option value="${k}"${k === C.preset ? " selected" : ""}>${v}</option>`).join("") + `</select></label>` +
+    `<span class="costFields"${C.preset === "custom" ? "" : " hidden"}>` +
+    FIELDS.map(([k, label]) => `<label class="field param"><span>${label}</span><input type="number" name="${k}"${f} value="${C.values[k]}" min="0" step="any"${C.preset === "custom" ? "" : " disabled"}></label>`).join("") +
+    `</span>`;
+  const sel = slot.querySelector(".costSel"), box = slot.querySelector(".costFields");
+  sel.addEventListener("change", () => {
+    const custom = sel.value === "custom";
+    box.hidden = !custom;
+    box.querySelectorAll("input").forEach(i => {
+      i.disabled = !custom;                                   // presets don't send the fields
+      if (custom) i.value = C.presets[C.preset === "custom" ? "realistic" : C.preset][i.name];
+    });
+    if (!custom && onPreset) onPreset();
+  });
+}
+
 // ---- App controls (only when served by quantlab.app) -------------------------
 if (DATA.app) {
   const A = DATA.app, form = document.getElementById("appbar");
@@ -476,6 +511,8 @@ if (DATA.app) {
       (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "") +
       ` step="${p.step ?? "any"}" inputmode="${p.type === "int" ? "numeric" : "decimal"}"></label>`;
   }).join("");
+  if (A.costs && A.strategy !== "none")      // costs only matter when a strategy trades
+    costControls(document.getElementById("costsIn"), A.costs, null, () => form.requestSubmit());
   const resetBtn = document.getElementById("resetBtn");
   const anyChanged = Object.entries(params).some(([k, p]) => (A.settings[k] ?? p.default) !== p.default);
   resetBtn.hidden = !anyChanged;
@@ -497,7 +534,7 @@ if (DATA.app) {
   const optLink = document.getElementById("optLink");
   const sweepable = Object.keys(params).length > 0;
   optLink.hidden = !sweepable;
-  if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&tf=${DATA.timeframe || "1d"}&strategy=${encodeURIComponent(A.strategy)}`;
+  if (sweepable) optLink.href = `/optimize?ticker=${encodeURIComponent(DATA.ticker)}&tf=${DATA.timeframe || "1d"}&strategy=${encodeURIComponent(A.strategy)}` + costQuery(A.costs);
   form.hidden = false;
 }
 
