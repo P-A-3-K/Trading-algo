@@ -50,7 +50,11 @@ def test_plain_candles(server):
 
 
 def test_api_lists(server):
-    assert json.loads(get(server + "/api/tickers")[1]) == {"tickers": ["TEST"]}
+    tickers = json.loads(get(server + "/api/tickers")[1])
+    assert tickers["tickers"] == ["TEST"]
+    pop = {t["symbol"]: t for t in tickers["popular"]}
+    assert pop["SPY"]["name"] == "S&P 500" and pop["SPY"]["saved"] is False
+    assert pop["TEST"] == {"symbol": "TEST", "name": None, "group": "Your downloads", "saved": True}
     ids = [s["id"] for s in json.loads(get(server + "/api/strategies")[1])["strategies"]]
     assert ids[:3] == ["BuyAndHold", "SmaCrossover", "MeanReversion"]
     assert "Breakout" in ids                  # discovered from strategies/
@@ -89,7 +93,7 @@ def test_page_carries_menu_data(server):
     data = json.loads(body.split("const DATA = ")[1].split(";\n")[0])
     assert data["app"]["strategy"] == "MeanReversion"
     assert data["app"]["settings"] == {"lookback": 20, "entry": 1.5, "flat_at_close": False}
-    assert data["app"]["tickers"] == ["TEST"]
+    assert {"symbol": "TEST", "name": None, "group": "Your downloads", "saved": True} in data["app"]["tickers"]
     assert [s["id"] for s in data["app"]["strategies"]][0] == "BuyAndHold"
     plain = get(server + "/?ticker=TEST&strategy=none")[1]
     assert '"strategy":"none","settings":{}' in plain
@@ -115,3 +119,25 @@ def test_phone_mode_address_helpers(monkeypatch):
     addrs = app.lan_addresses()
     assert "127.0.0.1" not in addrs and "169.254.3.4" not in addrs
     assert {"100.70.1.2", "192.168.1.23"} <= set(addrs)
+
+
+def test_search_route_local_and_remote(server, monkeypatch):
+    from quantlab import search
+    monkeypatch.setattr(search, "search", lambda q: [
+        {"symbol": "GLD", "name": "SPDR Gold Shares", "type": "ETF", "exchange": "NYSE Arca", "us": True, "supported": True},
+        {"symbol": "GC=F", "name": "Gold futures", "type": "Future", "exchange": "COMEX", "us": True, "supported": False}])
+    r = json.loads(get(server + "/api/search?q=gold")[1])
+    assert [x["symbol"] for x in r["local"]] == ["GLD"]            # from the popular list
+    assert [x["symbol"] for x in r["remote"]] == ["GC=F"]          # GLD not repeated
+    def offline(q):
+        raise search.requests.ConnectionError("no network")
+    monkeypatch.setattr(search, "search", offline)
+    r = json.loads(get(server + "/api/search?q=tech")[1])
+    assert r["local"][0]["symbol"] == "XLK" and "unavailable" in r["error"]
+
+
+def test_index_tickers_allowed():
+    assert dl.clean_ticker("^gspc") == "^GSPC"
+    for bad in ["^^X", "SP^Y", "^"]:
+        with pytest.raises(ValueError):
+            dl.clean_ticker(bad)

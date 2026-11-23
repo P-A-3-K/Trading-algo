@@ -247,6 +247,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
             "costs": costs.describe() if (strategy is not None and costs) else "",
             "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,
+            "is_index": ticker.startswith("^"),
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
             "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck}
 

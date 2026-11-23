@@ -27,7 +27,7 @@ from urllib.parse import parse_qs, urlparse
 
 import math
 
-from . import chart, optimize, strategies
+from . import chart, optimize, strategies, universe
 from . import download as dl
 
 DEFAULT_TICKER = "SPY"
@@ -162,7 +162,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
     cost_name, cost_model = costs_of(query)
     app = {"strategy": cls.__name__, "strategies": strategies_info(), "errors": strategy_errors(),
            "costs": cost_menu(cost_name, cost_model),
-           "tickers": dl.cached_tickers(), "ranges": ranges, "split": split,
+           "tickers": universe.menu(dl.cached_tickers()), "ranges": ranges, "split": split,
            "rank": rank, "mode": mode, "wf": wf,
            "max_combos": optimize.WF_MAX_COMBINATIONS if mode == "wf" else optimize.MAX_COMBINATIONS}
     app["timeframes"], app["timeframe"] = TIMEFRAME_MENU, tf
@@ -261,6 +261,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/": self.page, "/optimize": self.optimize_page,
                   "/api/strategies": self.api_strategies,
                   "/api/tickers": self.api_tickers, "/api/backtest": self.api_backtest,
+                  "/api/search": self.api_search,
                   "/favicon.ico": self.no_content}
         handler = routes.get(url.path)
         if handler is None:
@@ -289,7 +290,7 @@ class Handler(BaseHTTPRequestHandler):
             "errors": strategy_errors(),
             "timeframes": TIMEFRAME_MENU,
             "costs": cost_menu(cost_name, cost_model),
-            "tickers": dl.cached_tickers(),
+            "tickers": universe.menu(dl.cached_tickers()),
         }
         self.send(HTTPStatus.OK, chart.PAGE.format(body=chart.render_payload(payload)),
                   "text/html; charset=utf-8")
@@ -307,7 +308,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"strategies": strategies_info(), "errors": strategy_errors()})
 
     def api_tickers(self, query):
-        self.send_json({"tickers": dl.cached_tickers()})
+        self.send_json({"tickers": dl.cached_tickers(),
+                        "popular": universe.menu(dl.cached_tickers())})
+
+    def api_search(self, query):
+        """Ticker search by name: the popular list first, then Yahoo's live results."""
+        from . import search
+        q = (query.get("q") or "").strip()
+        local = universe.find(q, dl.cached_tickers())
+        try:
+            remote, error = search.search(q), ""
+        except Exception as e:                    # offline or Yahoo unavailable
+            remote, error = [], f"Online search unavailable ({type(e).__name__}); showing the built-in list only."
+        seen = {r["symbol"] for r in local}
+        self.send_json({"query": q, "local": local,
+                        "remote": [r for r in remote if r["symbol"] not in seen], "error": error})
 
     def api_backtest(self, query):
         ticker = query.get("ticker") or DEFAULT_TICKER

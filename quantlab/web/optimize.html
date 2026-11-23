@@ -137,6 +137,19 @@ span.tip-i:hover::after, span.tip-i:focus::after { content: attr(data-tip); posi
   transform: translateX(-50%); width: max-content; max-width: min(280px, 80vw); white-space: normal; z-index: 20;
   background: var(--fg); color: var(--bg); font: 400 12px/1.45 var(--sans); padding: 7px 9px; border-radius: 6px;
   box-shadow: 0 4px 14px rgba(0,0,0,.18); text-align: left; }
+.tpick-host { position: relative; }
+.tpick { text-transform: none; letter-spacing: normal; position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; width: min(440px, calc(100vw - 32px));
+  max-height: min(380px, 60vh); overflow-y: auto; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.18); padding: 4px 0; text-transform: none; letter-spacing: 0; }
+.tpick[hidden] { display: none; }
+.tpick-head { padding: 8px 12px 4px; font: 600 11px/1.2 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.tpick-hint { padding: 8px 12px; font: 400 12px/1.4 var(--sans); color: var(--muted); }
+.tpick-opt { display: grid; grid-template-columns: 5.5em 1fr; column-gap: 10px; padding: 6px 12px; cursor: pointer; }
+.tpick-opt b { font: 600 13px/1.4 var(--mono); color: var(--fg); grid-row: span 2; align-self: center; overflow-wrap: anywhere; }
+.tpick-name { font: 400 13px/1.35 var(--sans); color: var(--fg); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpick-meta { font: 400 11px/1.35 var(--sans); color: var(--muted); }
+.tpick-opt:hover, .tpick-opt.on { background: var(--grid); }
+.tpick-opt.dis { cursor: not-allowed; opacity: .55; }
 .notice-box { border: 1px solid var(--line); border-left: 4px solid var(--down); border-radius: 8px; background: var(--panel);
   padding: 10px 14px; font-size: 13px; }
 .notice-box ul { margin: 6px 0 0; padding-left: 18px; }
@@ -148,9 +161,8 @@ footer { color: var(--muted); font-size: 12px; }
   <form class="card appbar" id="form" method="get" action="/optimize">
     <span class="brand">QuantLab</span>
     <label class="field"><span>Ticker</span>
-      <input id="tickerIn" name="ticker" list="tickerList" autocomplete="off" spellcheck="false" maxlength="15" required
-             pattern="[A-Za-z0-9][A-Za-z0-9.\-^=]{0,14}"></label>
-    <datalist id="tickerList"></datalist>
+      <input id="tickerIn" name="ticker" autocomplete="off" spellcheck="false" maxlength="16" required
+             pattern="\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14}"></label>
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
     <button type="button" class="guide-btn" id="guideBtn" aria-expanded="false" aria-controls="guidePanel" hidden>ⓘ How it works</button>
@@ -335,6 +347,121 @@ function setupGuide(btn, panel, strategy, intraday) {
   show(open);
 }
 
+
+// ---- Ticker picker: browse popular tickers, or search by company/fund name -------------
+function tickerPicker(input, tickers, onPick) {
+  const host = input.closest("label");
+  host.classList.add("tpick-host");
+  input.removeAttribute("list");
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-expanded", "false");
+  input.placeholder = "Symbol or name";
+  const box = document.createElement("div");
+  box.className = "tpick"; box.id = input.id + "-list"; box.setAttribute("role", "listbox"); box.hidden = true;
+  input.setAttribute("aria-controls", box.id);
+  host.appendChild(box);
+  let items = [], active = -1, timer = null, seq = 0, searching = false, enterWaiting = false;
+  const saved = new Set(tickers.filter(t => t.saved).map(t => t.symbol));
+  const row = (r, extra = "") => {
+    const meta = [r.type, r.exchange, r.group].filter(Boolean).join(" · ");
+    const dis = r.supported === false;
+    return `<div class="tpick-opt${dis ? " dis" : ""}" role="option" data-sym="${esc(r.symbol)}"${dis ? ' aria-disabled="true"' : ""}>` +
+      `<b>${esc(r.symbol)}</b><span class="tpick-name">${esc(r.name || "")}</span>` +
+      `<span class="tpick-meta">${esc(meta)}${saved.has(r.symbol) ? " · ✓ downloaded" : ""}${dis ? " · not supported yet" : ""}${extra}</span></div>`;
+  };
+  const head = t => `<div class="tpick-head">${esc(t)}</div>`;
+  function localMatches(q) {
+    q = q.toLowerCase();
+    const score = r => {
+      const s = r.symbol.toLowerCase(), n = (r.name || "").toLowerCase();
+      if (s === q || s === "^" + q) return 0;
+      if (s.replace("^", "").startsWith(q)) return 1;
+      if (n.split(/[\s(]+/).some(w => w.startsWith(q))) return 2;
+      return n.includes(q) ? 3 : null;
+    };
+    return tickers.map((r, i) => [score(r), i, r]).filter(x => x[0] !== null)
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]).slice(0, 8).map(x => x[2]);
+  }
+  function render(html) {
+    box.innerHTML = html; box.hidden = false; input.setAttribute("aria-expanded", "true");
+    items = [...box.querySelectorAll(".tpick-opt:not(.dis)")]; active = -1;
+    // keep it on screen: shift left if it would stick out past the right edge
+    box.style.left = "0px";
+    const over = box.getBoundingClientRect().right - (document.documentElement.clientWidth - 16);
+    if (over > 0) box.style.left = -over + "px";
+  }
+  function close() { box.hidden = true; input.setAttribute("aria-expanded", "false"); active = -1; }
+  function browse() {
+    const groups = {};
+    tickers.forEach(t => (groups[t.group] = groups[t.group] || []).push(t));
+    render(`<div class="tpick-hint">Type a symbol or a name (e.g. "apple", "gold", "nasdaq") to search all of Yahoo Finance.</div>` +
+      Object.entries(groups).map(([g, rs]) => head(g) + rs.map(r => row(r)).join("")).join(""));
+  }
+  function searchFor(q) {
+    const local = localMatches(q);
+    const localHtml = local.length ? head("From the popular list") + local.map(r => row(r)).join("") : "";
+    render(localHtml + `<div class="tpick-hint">Searching Yahoo Finance…</div>`);
+    clearTimeout(timer);
+    const my = ++seq;
+    searching = true;
+    timer = setTimeout(async () => {
+      try {
+        const res = await (await fetch(`/api/search?q=${encodeURIComponent(q)}`)).json();
+        if (my !== seq) return;                              // a newer search is running
+        const remote = res.remote || [];
+        const html = localHtml + (remote.length ? head("From Yahoo Finance") + remote.map(r => row(r)).join("") : "") +
+          (res.error ? `<div class="tpick-hint">${esc(res.error)}</div>` : "") +
+          (!local.length && !remote.length ? `<div class="tpick-hint">No matches for "${esc(q)}". Check the spelling, or try the company name.</div>` : "");
+        render(html);
+      } catch (e) {
+        if (my === seq) render(localHtml + `<div class="tpick-hint">Online search unavailable; showing the built-in list only.</div>`);
+      }
+      if (my === seq) { searching = false; if (enterWaiting) { enterWaiting = false; enterPick(); } }
+    }, 250);
+  }
+  function pick(sym) { input.value = sym; close(); onPick && onPick(sym); }
+  // Enter without choosing: exact symbol if listed, else the top result, else what was typed
+  function enterPick() {
+    const typed = input.value.trim().toUpperCase();
+    const syms = items.map(i => i.dataset.sym);
+    if (syms.includes(typed)) return pick(typed);
+    if (syms.length) return pick(syms[0]);
+    close(); onPick ? onPick(typed) : input.form?.requestSubmit();
+  }
+  function move(d) {
+    if (!items.length) return;
+    items[active]?.classList.remove("on");
+    active = (active + d + items.length) % items.length;
+    items[active].classList.add("on"); items[active].scrollIntoView({ block: "nearest" });
+    input.setAttribute("aria-activedescendant", "");
+  }
+  input.addEventListener("focus", () => { input.select(); browse(); });
+  input.addEventListener("input", () => {
+    input.value = input.value.toUpperCase().replace(/\s+/g, " ").trimStart();
+    const q = input.value.trim();
+    q ? searchFor(q) : browse();
+  });
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (box.hidden) browse(); move(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+    else if (e.key === "Escape") { close(); }
+    else if (e.key === "Enter" && !box.hidden && active >= 0) { e.preventDefault(); pick(items[active].dataset.sym); }
+    else if (e.key === "Enter" && input.value.trim()) {
+      e.preventDefault();
+      const typed = input.value.trim().toUpperCase();
+      if (items.some(i => i.dataset.sym === typed)) pick(typed);
+      else if (searching) enterWaiting = true;               // wait for Yahoo's answer
+      else enterPick();
+    }
+  });
+  box.addEventListener("mousedown", e => e.preventDefault());   // keep focus in the box
+  box.addEventListener("click", e => {
+    const opt = e.target.closest(".tpick-opt"); if (opt && !opt.classList.contains("dis")) pick(opt.dataset.sym);
+  });
+  input.addEventListener("blur", () => setTimeout(close, 120));
+}
+
 // ---- Controls --------------------------------------------------------------------
 const tIn = document.getElementById("tickerIn"), sIn = document.getElementById("stratIn");
 tIn.value = DATA.ticker;
@@ -344,13 +471,12 @@ tfIn.innerHTML = A.timeframes.map(([v, label]) => `<option value="${v}">${label}
 tfIn.value = TF;
 tfIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${tfIn.value}&strategy=${sIn.value}` + costQuery(A.costs); });
 const fmtTime = t => typeof t === "number" ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : t;
-document.getElementById("tickerList").innerHTML = A.tickers.map(t => `<option value="${esc(t)}"></option>`).join("");
+tickerPicker(tIn, A.tickers, null);
 const sweepable = A.strategies.filter(s => Object.keys(s.params).length);
 sIn.innerHTML = strategyOptions(sweepable);
 strategyNotice(A);
 sIn.value = S.id;
 sIn.addEventListener("change", () => { location.href = `/optimize?ticker=${encodeURIComponent(tIn.value)}&tf=${TF}&strategy=${sIn.value}` + costQuery(A.costs); });
-tIn.addEventListener("input", () => { tIn.value = tIn.value.toUpperCase(); });
 document.getElementById("stratName").textContent = S.name;
 setupGuide(document.getElementById("guideBtn"), document.getElementById("guidePanel"), S, DATA.intraday);
 document.getElementById("splitIn").value = String(A.split);

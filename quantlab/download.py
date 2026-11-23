@@ -49,15 +49,15 @@ def fetch(ticker: str, timeout: float = 30) -> pd.DataFrame:
     return parse_chart(resp.json())
 
 
-TICKER_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,14}$")
+TICKER_RE = re.compile(r"^\^?[A-Z0-9][A-Z0-9.\-=]{0,14}$")
 
 
 def clean_ticker(ticker: str) -> str:
     """Upper-case a ticker and reject anything that isn't a plausible symbol.
 
     Tickers become file names and URLs, so this stops input like '../secret'
-    from reaching files outside data/. Allowed: letters, digits, . - ^ =
-    (e.g. BRK-B, ^GSPC, EURUSD=X), up to 15 characters.
+    from reaching files outside data/. Allowed: an optional leading ^ (indices),
+    then letters, digits and . - = (e.g. BRK-B, ^GSPC), up to 16 characters.
     """
     t = str(ticker).strip().upper()
     if not TICKER_RE.match(t):
@@ -93,8 +93,9 @@ def download_many(tickers, refresh=False, pause: float = 1.0) -> dict:
     """
     results = {}
     for i, t in enumerate(tickers):
-        was_cached = csv_path(t).exists() and not refresh
+        was_cached = False
         try:
+            was_cached = csv_path(t).exists() and not refresh
             results[t] = download(t, refresh=refresh)
         except Exception as exc:  # report and keep going
             results[t] = f"failed: {exc}"
@@ -290,6 +291,11 @@ def load_intraday(ticker: str, timeframe: str) -> pd.DataFrame:
 
 if __name__ == "__main__":
     import sys
-    tickers = sys.argv[1:] or ["SPY"]
-    for t, result in download_many(tickers).items():
+    args = sys.argv[1:]
+    if "--popular" in args:
+        from .universe import popular_tickers
+        tickers = popular_tickers()
+    else:
+        tickers = [a for a in args if not a.startswith("--")] or ["SPY"]
+    for t, result in download_many(tickers, refresh="--refresh" in args).items():
         print(f"{t:6s} {result}")
