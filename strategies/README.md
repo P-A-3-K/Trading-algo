@@ -38,6 +38,16 @@ code to change, no restart: save the file and refresh the browser.
 | Always invested / always in cash | `pd.Series(1.0, index=bars.index)` / `0.0` |
 | Buy on X, sell on Y, hold in between | `s = pd.Series(float("nan"), index=bars.index); s[X] = 1.0; s[Y] = 0.0; return s.ffill().fillna(0.0)` |
 
+**Timeframes:** the same code runs on daily or intraday candles (5m ... 4h). Settings count
+**bars**, so `rolling(20)` is 20 days on daily candles but 100 minutes on 5m. Intraday bars
+are indexed by New York time and include pre-market and after-hours.
+
+**Day trading:** every strategy automatically gets a "Day trade: flat outside 9:30-16:00"
+setting on intraday timeframes; you don't need to code anything for position-based
+strategies. Trade-based strategies (`self.trade`) can use
+`may_enter, may_hold = self.session_masks(bars)` to respect it inside their loop
+(see `fvg.py`); otherwise trades are cut at the close automatically.
+
 **Positions:** `1` = fully invested, `0` = cash, `-1` = fully short, `0.5` = half.
 The position you return for a day is decided at that day's close and earns from the next day.
 

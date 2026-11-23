@@ -24,7 +24,7 @@ def test_values_inclusive_and_float_safe():
 
 def test_grid_keeps_unvaried_settings_at_default():
     g = optimize.grid(SmaCrossover, {"fast": (10, 30, 10)})
-    assert g == [{"fast": 10, "slow": 200}, {"fast": 20, "slow": 200}, {"fast": 30, "slow": 200}]
+    assert g == [{"fast": f, "slow": 200, "flat_at_close": False} for f in (10, 20, 30)]
     with pytest.raises(ValueError, match="no setting"):
         optimize.grid(SmaCrossover, {"speed": (1, 2, 1)})
     with pytest.raises(ValueError, match="at least"):

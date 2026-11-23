@@ -34,3 +34,21 @@ Not fine for redistributing the data or running a commercial product. So:
 Free sources only cover tickers that still exist. Testing "the S&P 500 today" over 20 years
 ignores companies that went bankrupt or were dropped, which makes results look too good.
 We will handle this in the Data checks / Validation lessons.
+
+## Intraday data (added later)
+
+| Timeframe | Source | History available for free |
+|---|---|---|
+| 5m | Yahoo `interval=5m` | last ~60 days |
+| 15m, 30m | built from 5m | same as 5m |
+| 1h | Yahoo `interval=1h` | last ~2 years |
+| 4h | built from 1h (bins 0/4/8/12/16/20 New York time) | same as 1h |
+
+- Includes pre-market and after-hours (`includePrePost=true`), 4:00-20:00 New York.
+  Yahoo reports **zero volume** outside regular hours.
+- **Not adjusted for dividends** (Yahoo doesn't adjust intraday). Minor over weeks/months.
+- Every download is **merged** into `data/<tf>/<TICKER>.csv`, so history grows over time.
+- **Bad prints:** thin after-hours trading produces wicks like a 6% drop on a bar whose
+  open and close are equal. `clean_spikes()` trims wicks that stick out >2% beyond the body
+  and >10x the typical range of the previous 50 bars (only past bars are used).
+- Next: Alpaca's free data API for years of 1-minute history.

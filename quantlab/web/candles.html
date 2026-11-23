@@ -457,9 +457,17 @@ if (DATA.app) {
   describe();
   // One number box per strategy setting, built from the strategy's params:
   // label, allowed range and step come from Param(default, min, max, label, step)
-  const params = byId[A.strategy]?.params || {};
+  // Settings shown here: all of the strategy's, minus intraday-only ones on daily bars
+  const params = Object.fromEntries(Object.entries(byId[A.strategy]?.params || {})
+    .filter(([, p]) => DATA.intraday || !p.intraday_only));
   keep.innerHTML = Object.entries(params).map(([k, p]) => {
     const value = A.settings[k] ?? p.default;
+    if (p.type === "bool") {                       // yes/no setting -> menu
+      const changed = value !== p.default ? " changed" : "";
+      return `<label class="field param${changed}" title="${esc(p.label || k)} · default ${p.default ? "yes" : "no"}">` +
+        `<span>${esc(p.label || k)}</span><select name="${esc(k)}">` +
+        `<option value="0"${value ? "" : " selected"}>No</option><option value="1"${value ? " selected" : ""}>Yes</option></select></label>`;
+    }
     const range = [p.min, p.max].every(v => v !== null) ? `${p.min}–${p.max}` : "";
     const changed = value !== p.default ? " changed" : "";
     return `<label class="field param${changed}" title="${esc((p.label || k) + (range ? " · allowed " + range : "") + " · default " + p.default)}">` +
@@ -472,7 +480,8 @@ if (DATA.app) {
   const anyChanged = Object.entries(params).some(([k, p]) => (A.settings[k] ?? p.default) !== p.default);
   resetBtn.hidden = !anyChanged;
   resetBtn.addEventListener("click", () => {
-    keep.querySelectorAll("input").forEach(i => { i.value = params[i.name].default; });
+    keep.querySelectorAll("input, select").forEach(i => {
+      const d = params[i.name].default; i.value = typeof d === "boolean" ? (d ? "1" : "0") : d; });
     form.requestSubmit();
   });
   sIn.addEventListener("change", () => {      // new strategy: start from its defaults

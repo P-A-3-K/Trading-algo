@@ -43,7 +43,7 @@ def main(argv=None) -> int:
     for f in found:
         cls = f.cls
         print(f"\n{cls.__name__}: \"{cls.name}\"")
-        for k, p in cls.params.items():
+        for k, p in cls.params.items():   # (built-in settings like flat_at_close not listed)
             print(f"    setting {k:12s} default {p.default:<6} allowed {p.min}-{p.max}  ({p.label})")
         if f.problem:
             ok = False

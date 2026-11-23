@@ -21,7 +21,9 @@ The trade:
   * Size: risk `risk_pct` % of the account between entry and stop, capped at 100%
     of the account (no borrowing).
   * One trade at a time. FVGs touched while a trade is open are used up.
-    An FVG that isn't touched within `expiry` days is dropped.
+    An FVG that isn't touched within `expiry` bars is dropped.
+  * Day trading (built-in setting, intraday only): enter only in regular hours
+    (9:30-16:00 New York) and close any open trade at the last regular bar's close.
 """
 import numpy as np
 import pandas as pd
@@ -36,7 +38,7 @@ class FairValueGap(Strategy):
     params = {
         "rr": Param(2.0, 0.5, 10.0, "Take profit (reward:risk)", step=0.5),
         "swing": Param(2, 1, 10, "Swing size (bars each side)"),
-        "expiry": Param(20, 1, 250, "FVG expires after (days)"),
+        "expiry": Param(20, 1, 250, "FVG expires after (bars)"),
         "risk_pct": Param(1.0, 0.1, 10.0, "Risk per trade (% of account)", step=0.1),
     }
 
@@ -49,11 +51,12 @@ class FairValueGap(Strategy):
         signal = None                          # FVG touched today -> enter at next open
         trade = None                           # the open trade, if any
         zone_top, zone_bot, stop_line, target_line = (np.full(n, np.nan) for _ in range(4))
+        may_enter, may_hold = self.session_masks(bars)   # all True unless day trading
 
         for t in range(n):
             # 1. Enter at today's open if yesterday touched an FVG
             entered_today = False
-            if signal is not None and trade is None:
+            if signal is not None and trade is None and may_enter[t]:
                 f, entry = signal, o[t]
                 if (entry - f["stop"]) * f["side"] > 0:          # open still on the right side of the stop
                     risk = abs(entry - f["stop"])
@@ -85,6 +88,8 @@ class FairValueGap(Strategy):
                         exit_price, reason = o[t], "target (gap)"
                     elif l[t] <= target:
                         exit_price, reason = target, "target"
+                if exit_price is None and not may_hold[t]:       # day trading: flat at the close
+                    exit_price, reason = c[t], "end of day"
                 if exit_price is not None:
                     self.trade(trade["date"], trade["entry"], side, trade["size"], dates[t],
                                exit_price, stop, target, reason)

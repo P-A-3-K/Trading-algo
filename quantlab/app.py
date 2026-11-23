@@ -43,7 +43,7 @@ def strategy_from_query(query: dict):
     if not name or name.lower() == "none":
         return None
     cls = strategies.get(name)
-    settings = {k: v for k, v in query.items() if k in cls.params and v != ""}
+    settings = {k: v for k, v in query.items() if k in cls.all_params() and v != ""}
     return cls(**settings)
 
 
@@ -68,7 +68,10 @@ def default_ranges(cls) -> dict:
     so a strategy with many settings doesn't start with a huge grid.
     """
     out = {}
-    for n, (k, p) in enumerate(cls.params.items()):
+    for n, (k, p) in enumerate(cls.all_params().items()):
+        if p.is_bool:                                   # yes/no settings: fixed at default
+            out[k] = [int(p.default), int(p.default), 1]
+            continue
         lo = p.min if p.min is not None else p.default
         hi = p.max if p.max is not None else p.default
         if n >= 2:
@@ -108,10 +111,10 @@ def optimize_payload(ticker: str, query: dict) -> dict:
     if not cls.params:
         raise ValueError(f"{cls.name} has no settings to sweep. Pick another strategy.")
     ranges = default_ranges(cls)
-    for k, p in cls.params.items():
+    for k, p in cls.all_params().items():
         if f"{k}_from" in query:
             ranges[k] = [float(query[f"{k}_from"]), float(query[f"{k}_to"]), float(query[f"{k}_step"])]
-            if p.is_int:
+            if p.is_int or p.is_bool:
                 ranges[k] = [int(round(x)) for x in ranges[k]]
     split = float(query.get("split", 0.7))
     rank = query.get("rank", "sharpe")
@@ -145,7 +148,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
         if res.table.empty:
             raise ValueError("No valid combinations: " + (res.skipped[0][1] if res.skipped else "empty grid"))
         varied = [k for k, (a, b, _) in ranges.items() if b > a]
-        p_int = {k: cls.params[k].is_int for k in ranges}
+        p_int = {k: cls.all_params()[k].is_int or cls.all_params()[k].is_bool for k in ranges}
         rows = [{k: (clean(v) if k not in ranges else (int(v) if p_int[k] else float(v)))
                  for k, v in row.items()} for row in res.table.to_dict("records")]
         idx = bars.index

@@ -49,6 +49,7 @@ button.run:disabled { opacity: .7; cursor: progress; }
 .ranges { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)); gap: 8px 12px; align-items: end; max-width: 720px; }
 .ranges .head { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .ranges .name { font-weight: 500; align-self: center; }
+.ranges [hidden] { display: none !important; }
 .ranges .name small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 .ranges input { width: 100%; box-sizing: border-box; }
 .row2 { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin-top: 14px; }
@@ -270,6 +271,16 @@ document.getElementById("ranges").innerHTML =
   `<span class="head">Setting</span><span class="head">From</span><span class="head">To</span><span class="head">Step</span>` +
   params.map(([k, p]) => {
     const r = R[k], lim = (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "");
+    if (p.type === "bool") {          // yes/no: test one value, or both
+      const hidden = !DATA.intraday && p.intraday_only;
+      const pick = r[0] !== r[1] ? "both" : r[0] ? "yes" : "no";
+      return `<span class="name"${hidden ? " hidden" : ""}>${esc(p.label || k)}<small>${esc(k)} · yes/no</small></span>` +
+        `<select class="boolRange" data-k="${esc(k)}" style="grid-column: span 3"${hidden ? " hidden" : ""}>` +
+        `<option value="no"${pick === "no" ? " selected" : ""}>No</option><option value="yes"${pick === "yes" ? " selected" : ""}>Yes</option>` +
+        `<option value="both"${pick === "both" ? " selected" : ""}>Test both</option></select>` +
+        `<input type="hidden" form="form" name="${esc(k)}_from" value="${r[0]}"><input type="hidden" form="form" name="${esc(k)}_to" value="${r[1]}">` +
+        `<input type="hidden" form="form" name="${esc(k)}_step" value="1">`;
+    }
     const step = p.type === "int" ? 1 : "any";   // ranges like 0.25 must be allowed; the server checks values
     return `<span class="name">${esc(p.label || k)}<small>${esc(k)} · allowed ${p.min}–${p.max}</small></span>` +
       `<input form="form" type="number" name="${esc(k)}_from" value="${r[0]}" required${lim} step="${step}" aria-label="${esc(k)} from">` +
@@ -310,6 +321,12 @@ function countCombos() {
   return n;
 }
 document.getElementById("ranges").addEventListener("input", countCombos);
+document.querySelectorAll(".boolRange").forEach(sel => sel.addEventListener("change", () => {
+  const k = sel.dataset.k, v = sel.value;
+  document.querySelector(`[name="${k}_from"]`).value = v === "yes" ? 1 : 0;
+  document.querySelector(`[name="${k}_to"]`).value = v === "no" ? 0 : 1;
+  countCombos();
+}));
 countCombos();
 const form = document.getElementById("form"), runBtn = document.getElementById("runBtn");
 form.addEventListener("submit", e => {
@@ -327,7 +344,8 @@ function drawWalkForward(W) {
   document.getElementById("wfResults").hidden = false;
   const LW = window.LightweightCharts, St = W.stats;
   const pct = v => (v * 100).toFixed(1) + "%", money = v => "$" + Math.round(v).toLocaleString();
-  const settingText = s => params.map(([k, p]) => `${(p.label || k).replace(/ \(.*\)$/, "")} ${s[k]}`).join(", ");
+  const settingText = s => params.filter(([k, p]) => p.type !== "bool" || s[k]).map(([k, p]) =>
+    p.type === "bool" ? (p.label || k) : `${(p.label || k).replace(/ \(.*\)$/, "")} ${s[k]}`).join(", ");
   // Verdict
   const v = document.getElementById("wfVerdict");
   // Judge on both: return (what you'd have made) and Sharpe (how smooth the ride was)
@@ -423,7 +441,8 @@ if (RES && RES.mode !== "wf") {
   const O = RES.report, v = document.getElementById("verdict");
   // "Best" for the verdict and the outlined square: top in-sample Sharpe ratio
   const best = [...rows].filter(r => r.is_sharpe !== null).sort((a, b) => b.is_sharpe - a.is_sharpe)[0];
-  const setting = r => params.map(([k, p]) => `${esc(p.label || k).replace(/ \(.*\)$/, "")} ${r[k]}`).join(", ");
+  const setting = r => params.filter(([k, p]) => p.type !== "bool" || r[k]).map(([k, p]) =>
+    p.type === "bool" ? esc(p.label || k) : `${esc(p.label || k).replace(/ \(.*\)$/, "")} ${r[k]}`).join(", ");
   if (O && best) {
     const c = O.rank_corr, cls = c >= 0.5 ? "good" : c >= 0.2 ? "weak" : "bad";
     const words = c >= 0.5 ? "held up well: settings that did well in-sample mostly did well afterwards too"

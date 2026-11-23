@@ -88,7 +88,7 @@ def test_page_carries_menu_data(server):
     body = get(server + "/?ticker=TEST&strategy=MeanReversion&entry=1.5")[1]
     data = json.loads(body.split("const DATA = ")[1].split(";\n")[0])
     assert data["app"]["strategy"] == "MeanReversion"
-    assert data["app"]["settings"] == {"lookback": 20, "entry": 1.5}
+    assert data["app"]["settings"] == {"lookback": 20, "entry": 1.5, "flat_at_close": False}
     assert data["app"]["tickers"] == ["TEST"]
     assert [s["id"] for s in data["app"]["strategies"]][0] == "BuyAndHold"
     plain = get(server + "/?ticker=TEST&strategy=none")[1]

@@ -12,6 +12,11 @@ opens QuantLab at http://127.0.0.1:8000; close the window or press Ctrl+C to sto
 
 To get the newest version and start: double-click **`update.bat`** (or `./update.sh`).
 
+**Timeframes:** pick 5m, 15m, 30m, 1h, 4h or 1 day in the app. Intraday candles include
+pre-market and after-hours (4:00-20:00 New York). Free intraday history is short (5m: last
+60 days, 1h: last 2 years), so QuantLab keeps every download and your history grows.
+Any strategy can be set to **day trade** (flat outside 9:30-16:00) on intraday timeframes.
+
 Needs Python 3.10+ ([python.org](https://www.python.org/downloads/), tick
 "Add python.exe to PATH" on Windows) and, for updates, Git.
 

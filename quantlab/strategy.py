@@ -43,13 +43,27 @@ class Param:
     max: Optional[float] = None
     label: str = ""
     step: Optional[float] = None   # app input step; defaults to 1 for whole numbers
+    intraday_only: bool = False    # only shown/used on intraday timeframes
 
     @property
     def is_int(self) -> bool:
         return isinstance(self.default, (int, np.integer)) and not isinstance(self.default, bool)
 
+    @property
+    def is_bool(self) -> bool:
+        return isinstance(self.default, bool)
+
     def coerce(self, name: str, value):
         """Convert and range-check a value, with a clear error message."""
+        if self.is_bool:                          # yes/no settings
+            if isinstance(value, str):
+                v = value.strip().lower()
+                if v in ("1", "true", "yes", "on"):
+                    return True
+                if v in ("0", "false", "no", "off", ""):
+                    return False
+                raise ValueError(f"{name} must be yes or no, got {value!r}")
+            return bool(value)
         try:
             value = int(value) if self.is_int else float(value)
         except (TypeError, ValueError):
@@ -62,9 +76,38 @@ class Param:
         return value
 
     def describe(self) -> dict:
+        kind = "bool" if self.is_bool else "int" if self.is_int else "float"
         return {"default": self.default, "min": self.min, "max": self.max,
                 "label": self.label, "step": self.step or (1 if self.is_int else None),
-                "type": "int" if self.is_int else "float"}
+                "type": kind, "intraday_only": self.intraday_only}
+
+
+# Settings every strategy gets automatically (on top of its own `params`)
+BUILTIN_PARAMS = {
+    "flat_at_close": Param(False, label="Day trade: flat outside 9:30-16:00", intraday_only=True),
+}
+
+
+def regular_hours(index) -> np.ndarray:
+    """True for intraday bars that start within regular hours (9:30-16:00 New York)."""
+    if not isinstance(index, pd.DatetimeIndex) or index.tz is None:
+        return np.ones(len(index), dtype=bool)
+    minutes = index.hour * 60 + index.minute
+    return np.asarray((minutes >= 9 * 60 + 30) & (minutes < 16 * 60))
+
+
+def hold_allowed(index) -> np.ndarray:
+    """For day trading: may a position be held from this bar's close into the next bar?
+
+    Only if the next bar (this bar's start + one bar length: the schedule, which is
+    known in advance) starts in regular hours on the same day. Uses no later data,
+    so it behaves the same in a live run as in a backtest.
+    """
+    if not isinstance(index, pd.DatetimeIndex) or index.tz is None or len(index) == 0:
+        return np.ones(len(index), dtype=bool)
+    step = pd.Series(index[1:] - index[:-1]).median() if len(index) > 1 else pd.Timedelta("5min")
+    nxt = index + step
+    return regular_hours(nxt) & np.asarray(nxt.date == index.date)
 
 
 @dataclass
@@ -109,13 +152,18 @@ class Strategy:
     description: str = ""
     params: dict = {}
 
+    @classmethod
+    def all_params(cls) -> dict:
+        """The strategy's own settings plus the built-in ones (e.g. flat_at_close)."""
+        return {**cls.params, **BUILTIN_PARAMS}
+
     def __init__(self, **settings):
-        unknown = set(settings) - set(self.params)
+        unknown = set(settings) - set(self.all_params())
         if unknown:
             raise ValueError(f"{self.name}: unknown setting(s) {sorted(unknown)}; "
-                             f"available: {sorted(self.params)}")
+                             f"available: {sorted(self.all_params())}")
         self.settings = {k: p.coerce(k, settings.get(k, p.default))
-                         for k, p in self.params.items()}
+                         for k, p in self.all_params().items()}
         self.validate()
         self._plots, self._trades = [], []
 
@@ -174,7 +222,12 @@ class Strategy:
                 if a.exit_date is None or b.entry_date < a.exit_date:
                     raise ValueError(f"{self.name}: trades overlap ({a.entry_date.date()} and "
                                      f"{b.entry_date.date()}); one trade at a time")
+            trades = self._day_trade_trades(bars, trades)
             positions = held_positions(bars.index, trades)
+        elif self.day_trading(bars) and isinstance(positions, pd.Series) \
+                and positions.index.equals(bars.index):
+            # flat outside regular hours: no position carried into a non-regular bar
+            positions = positions.where(hold_allowed(bars.index), 0.0)
         if not isinstance(positions, pd.Series):
             raise TypeError(f"{self.name}: compute() must return a pandas Series")
         if not positions.index.equals(bars.index):
@@ -186,14 +239,56 @@ class Strategy:
         return StrategyResult(positions.rename(self.name), list(self._plots),
                               dict(self.settings), trades)
 
+    # ---- Day trading (built-in "flat_at_close" setting) -----------------------------
+    def day_trading(self, bars: pd.DataFrame) -> bool:
+        """True when flat_at_close is on AND the bars are intraday."""
+        if not self.settings.get("flat_at_close"):
+            return False
+        idx = bars.index
+        return isinstance(idx, pd.DatetimeIndex) and idx.tz is not None
+
+    def session_masks(self, bars: pd.DataFrame):
+        """(may_enter, may_hold) arrays for trade-based strategies.
+
+        may_enter[t]: a position may be opened during bar t (regular hours).
+        may_hold[t]: a position may be carried from bar t's close into bar t+1.
+        Both all-True unless day trading.
+        """
+        if not self.day_trading(bars):
+            n = len(bars)
+            return np.ones(n, dtype=bool), np.ones(n, dtype=bool)
+        return regular_hours(bars.index), hold_allowed(bars.index)
+
+    def _day_trade_trades(self, bars, trades):
+        """Safety net for trade-based strategies that ignore day trading themselves:
+        drop entries outside regular hours, close open trades at the last regular bar."""
+        if not self.day_trading(bars):
+            return trades
+        rth, hold = regular_hours(bars.index), hold_allowed(bars.index)
+        idx, close = bars.index, bars["close"].to_numpy()
+        out = []
+        for t in trades:
+            i0 = idx.get_loc(t.entry_date)
+            if not rth[i0]:
+                continue
+            j = i0 + int(np.argmin(hold[i0:])) if not hold[i0:].all() else None
+            end = idx.get_loc(t.exit_date) if t.exit_date is not None else None
+            if j is not None and (end is None or end > j):
+                t = Trade(t.entry_date, t.entry_price, t.side, t.size, idx[j], float(close[j]),
+                          t.stop, t.target, "end of day")
+            out.append(t)
+        return out
+
     @classmethod
     def info(cls) -> dict:
         """What the app needs to list the strategy and build its settings form."""
         return {"name": cls.name, "description": cls.description,
-                "params": {k: p.describe() for k, p in cls.params.items()}}
+                "params": {k: p.describe() for k, p in cls.all_params().items()}}
 
     def __repr__(self):
-        args = ", ".join(f"{k}={v}" for k, v in self.settings.items())
+        shown = {k: v for k, v in self.settings.items()
+                 if k not in BUILTIN_PARAMS or v != BUILTIN_PARAMS[k].default}
+        args = ", ".join(f"{k}={v}" for k, v in shown.items())
         return f"{type(self).__name__}({args})"
 
 

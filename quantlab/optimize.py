@@ -40,12 +40,16 @@ def values(start, stop, step, is_int=True) -> list:
 def grid(cls, ranges: dict) -> list:
     """Every combination of settings, as dicts. ranges: {name: (from, to, step)};
     settings left out stay at their default."""
+    params = cls.all_params()
     for name in ranges:
-        if name not in cls.params:
+        if name not in params:
             raise ValueError(f"{cls.name} has no setting {name!r}")
     axes = {}
-    for name, p in cls.params.items():
-        if name in ranges:
+    for name, p in params.items():
+        if name in ranges and p.is_bool:                       # yes/no: one or both
+            lo, hi = p.coerce(name, str(int(ranges[name][0]))), p.coerce(name, str(int(ranges[name][1])))
+            axes[name] = sorted({lo, hi})
+        elif name in ranges:
             lo, hi, st = ranges[name]
             axes[name] = values(p.coerce(name, lo), p.coerce(name, hi), st, p.is_int)
         else:
