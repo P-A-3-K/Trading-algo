@@ -46,7 +46,9 @@ Describe the idea in one or two sentences.
     #   Param(default, min, max, label)        whole numbers: write the default as 14
     #   Param(1.5, 0.1, 4.0, label, step=0.1)  decimals: write the default as 1.5
     #   Param(False, label="Also go short")    yes/no: a Yes/No menu in the app
+    #   Param("4h", choices=("1h", "4h", "1d"), label="Higher timeframe")   a pick-one menu
     #   help="..."                             one line shown when hovering the setting
+    # Multi-timeframe: self.higher(bars, "4h") / self.on_higher(bars, "4h", func): see README.md
     # Read them in compute() as self.<name>, e.g. self.period.
     params = {
         "period": Param(14, 2, 100, "RSI length (bars)", help="How many bars RSI looks back."),

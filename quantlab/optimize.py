@@ -51,6 +51,21 @@ def values(start, stop, step, is_int=True) -> list:
     return [int(round(v)) for v in vals] if is_int else [round(float(v), 10) for v in vals]
 
 
+def is_varied(rng) -> bool:
+    """Does this setting take more than one value? ranges are (from, to, step) for
+    numbers and yes/no, or a list of picks for choice settings."""
+    if len(rng) == 3 and all(isinstance(x, (int, float, np.number)) and not isinstance(x, bool) for x in rng):
+        return rng[1] > rng[0]
+    return len(set(rng)) > 1
+
+
+def axis(p, rng) -> list:
+    """The values a setting takes in a sweep."""
+    if p.is_choice:
+        return list(dict.fromkeys(rng))
+    return values(*rng, p.is_int or p.is_bool)
+
+
 def grid(cls, ranges: dict) -> list:
     """Every combination of settings, as dicts. ranges: {name: (from, to, step)};
     settings left out stay at their default."""
@@ -60,7 +75,9 @@ def grid(cls, ranges: dict) -> list:
             raise ValueError(f"{cls.name} has no setting {name!r}")
     axes = {}
     for name, p in params.items():
-        if name in ranges and p.is_bool:                       # yes/no: one or both
+        if name in ranges and p.is_choice:                     # pick-one: the ticked values
+            axes[name] = list(dict.fromkeys(p.coerce(name, v) for v in ranges[name])) or [p.default]
+        elif name in ranges and p.is_bool:                     # yes/no: one or both
             lo, hi = p.coerce(name, str(int(ranges[name][0]))), p.coerce(name, str(int(ranges[name][1])))
             axes[name] = sorted({lo, hi})
         elif name in ranges:

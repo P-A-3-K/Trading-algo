@@ -50,6 +50,9 @@ button.run:disabled { opacity: .7; cursor: progress; }
 .ranges .head { font: 500 11px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .ranges .name { font-weight: 500; align-self: center; }
 .ranges [hidden] { display: none !important; }
+.choiceRange { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.choiceRange label { display: inline-flex; gap: 5px; align-items: center; font: 500 13px var(--mono); cursor: pointer; }
+.choiceRange input { accent-color: var(--accent); margin: 0; }
 .ranges .name small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 .ranges input { width: 100%; box-sizing: border-box; }
 .row2 { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin-top: 14px; }
@@ -612,6 +615,14 @@ document.getElementById("ranges").innerHTML =
   `<span class="head">Setting</span><span class="head">From</span><span class="head">To</span><span class="head">Step</span>` +
   params.map(([k, p]) => {
     const r = R[k], lim = (p.min !== null ? ` min="${p.min}"` : "") + (p.max !== null ? ` max="${p.max}"` : "");
+    if (p.type === "choice") {        // pick-one: tick the values to test
+      const picked = Array.isArray(r) ? r : [p.default];
+      const tip = p.help ? `<span class="tip-i" tabindex="0" role="note" aria-label="${esc(p.help)}" data-tip="${esc(p.help)}">i</span>` : "";
+      return `<span class="name">${esc(p.label || k)}${tip}<small>${esc(k)} · tick to test</small></span>` +
+        `<span class="choiceRange" data-k="${esc(k)}" style="grid-column: span 3">` +
+        p.choices.map(c => `<label><input type="checkbox" value="${esc(c)}"${picked.includes(c) ? " checked" : ""}>${esc(c)}</label>`).join("") +
+        `</span><input type="hidden" form="form" name="${esc(k)}_values" value="${esc(picked.join(","))}">`;
+    }
     if (p.type === "bool") {          // yes/no: test one value, or both
       const hidden = !DATA.intraday && p.intraday_only;
       const pick = r[0] !== r[1] ? "both" : r[0] ? "yes" : "no";
@@ -660,7 +671,8 @@ function showMode() {
 modeIn.addEventListener("change", showMode);
 function countCombos() {
   let n = 1;
-  for (const [k] of params) {
+  for (const [k, p] of params) {
+    if (p.type === "choice") { n *= Math.max(1, document.querySelectorAll(`.choiceRange[data-k="${k}"] input:checked`).length); continue; }
     const f = +document.querySelector(`[name="${k}_from"]`).value, t = +document.querySelector(`[name="${k}_to"]`).value,
           s = +document.querySelector(`[name="${k}_step"]`).value;
     n *= s > 0 && t >= f ? Math.floor((t - f) / s + 1e-9) + 1 : 0;
@@ -686,6 +698,12 @@ function countCombos() {
   return n;
 }
 document.getElementById("ranges").addEventListener("input", countCombos);
+document.querySelectorAll(".choiceRange").forEach(box => box.addEventListener("change", () => {
+  const picks = [...box.querySelectorAll("input:checked")].map(i => i.value);
+  if (!picks.length) { box.querySelector("input").checked = true; picks.push(box.querySelector("input").value); }   // at least one
+  form.elements[`${box.dataset.k}_values`].value = picks.join(",");
+  countCombos();
+}));
 document.querySelectorAll(".boolRange").forEach(sel => sel.addEventListener("change", () => {
   const k = sel.dataset.k, v = sel.value;
   document.querySelector(`[name="${k}_from"]`).value = v === "yes" ? 1 : 0;
@@ -809,8 +827,9 @@ function drawScan(R) {
   const beats = m => m.best_oos_sharpe !== null && m.bh_oos_sharpe !== null && m.best_oos_sharpe > m.bh_oos_sharpe;
   const setText = s => !s ? "–" : params.filter(([k, p]) => R.params.includes(k) && (p.type !== "bool" || s[k])).map(([k, p]) =>
     p.type === "bool" ? (p.label || k) : `${(p.label || k).replace(/ \(.*\)$/, "")} ${s[k]}`).join(", ");
-  const rangeQuery = () => params.map(([k]) => ["from", "to", "step"].map(x =>
-    `&${k}_${x}=${encodeURIComponent(form.elements[`${k}_${x}`].value)}`).join("")).join("");
+  const rangeQuery = () => params.map(([k, p]) => p.type === "choice"
+    ? `&${k}_values=${encodeURIComponent(form.elements[`${k}_values`].value)}`
+    : ["from", "to", "step"].map(x => `&${k}_${x}=${encodeURIComponent(form.elements[`${k}_${x}`].value)}`).join("")).join("");
   const sweepUrl = m => `/optimize?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&mode=split&split=${R.split}&rank=${R.rank}` +
     rangeQuery() + costQuery(A.costs) + chartHist(m.hist) + "&run=1";
   const chartUrl = m => `/?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&` +
@@ -1205,7 +1224,7 @@ if (RES && RES.mode !== "wf") {
     const sorted = [...rows].sort((a, b) => {
       const x = a[sortKey], y = b[sortKey];
       if (x === null) return 1; if (y === null) return -1;
-      return sortDir * (x - y);
+      return typeof x === "string" ? sortDir * x.localeCompare(y) : sortDir * (x - y);
     });
     const cellHtml = (c, r) => {
       const v = r[c.key];

@@ -193,3 +193,12 @@ def test_prop_check_route(server):
     assert d["rules"] == {**d["rules"], "target": 0.08, "target2": 0.0, "max_loss": 0.06, "trailing": True}
     assert get(server + "/api/prop?ticker=TEST&strategy=SmaCrossover&prop=nope")[0] == 400
     assert get(server + "/api/prop?ticker=TEST&strategy=none")[0] == 400
+
+
+def test_sweep_over_a_choice_setting(server):
+    status, body = get(server + "/optimize?ticker=TEST&strategy=FairValueGap&rr_from=2&rr_to=2&rr_step=1"
+                       "&swing_from=2&swing_to=2&swing_step=1&trend_tf_values=off,1d&run=1")
+    assert status == 200, body[:300]
+    assert '"trend_tf":"1d"' in body and '"trend_tf":"off"' in body
+    status, body = get(server + "/optimize?ticker=TEST&strategy=FairValueGap&trend_tf_values=2h&run=1")
+    assert status == 400 and "one of" in body

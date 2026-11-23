@@ -759,6 +759,12 @@ if (DATA.app) {
     .filter(([, p]) => DATA.intraday || !p.intraday_only));
   keep.innerHTML = Object.entries(params).map(([k, p]) => {
     const value = A.settings[k] ?? p.default;
+    if (p.type === "choice") {                     // pick-one setting (e.g. a timeframe) -> menu
+      const changed = value !== p.default ? " changed" : "";
+      return `<label class="field param${changed}" title="${esc(p.label || k)} · default ${esc(p.default)}">` +
+        `<span class="lbl-row"><span class="lbl-text">${esc(p.label || k)}</span>${tipIcon(p)}</span><select name="${esc(k)}">` +
+        p.choices.map(c => `<option value="${esc(c)}"${c === value ? " selected" : ""}>${esc(c)}</option>`).join("") + `</select></label>`;
+    }
     if (p.type === "bool") {                       // yes/no setting -> menu
       const changed = value !== p.default ? " changed" : "";
       return `<label class="field param${changed}" title="${esc(p.label || k)} · default ${p.default ? "yes" : "no"}">` +

@@ -44,6 +44,11 @@ class FairValueGap(Strategy):
                         help="Forget a gap that hasn't been retested within this many bars."),
         "risk_pct": Param(1.0, 0.1, 10.0, "Risk per trade (% of account)", step=0.1,
                           help="Position size is set so that hitting the stop loses about this % of the account (max 100% invested)."),
+        "trend_tf": Param("off", choices=("off", "15m", "30m", "1h", "4h", "1d"), label="Trend filter timeframe",
+                          help="Multi-timeframe filter: only take bullish gaps while this higher timeframe is in an "
+                               "up-trend (close above its average), bearish gaps in a down-trend. Off = take every gap."),
+        "trend_len": Param(50, 5, 400, "Trend average (higher candles)",
+                           help="Length of the trend filter's moving average, counted in the higher timeframe's candles."),
     }
     guide = """
 ## In short
@@ -59,6 +64,7 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
 - **Take-profit**: entry + *RR* x (entry - stop), mirrored for shorts.
 - **Exits** fill at the stop or target level, or at the open if price gaps past it. If one bar touches both, the stop is assumed (cautious).
 - One trade at a time; gaps touched during a trade are used up; untouched gaps expire.
+- **Trend filter** (optional, multi-timeframe): with *Trend filter timeframe* set to e.g. 4h, a bullish gap is only traded while the last **finished** 4h close is above its *Trend average*, a bearish gap only while below. Gaps against the trend are skipped (and used up).
 
 ## Settings
 - **RR**: higher targets win less often but pay more per win.
@@ -95,6 +101,16 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
         o, h, l, c = o.tolist(), h.tolist(), l.tolist(), c.tolist()
         is_swing_low, is_swing_high = is_swing_low.tolist(), is_swing_high.tolist()
         may_enter, may_hold = (m.tolist() for m in self.session_masks(bars))  # all True unless day trading
+
+        # Multi-timeframe trend filter: +1 up, -1 down, 0 unknown (from finished higher candles only)
+        if self.trend_tf != "off":
+            n_avg = self.trend_len
+            avg = self.on_higher(bars, self.trend_tf, lambda b: b.close.rolling(n_avg).mean())
+            last = self.higher(bars, self.trend_tf).close
+            trend = np.sign(last - avg).fillna(0.0).tolist()
+            self.plot(f"{self.trend_tf} trend average ({n_avg})", avg, style="step")
+        else:
+            trend = None
 
         swing_lows, swing_highs = [], []      # (bar index, price), confirmed so far
         pending = []                           # untouched FVGs
@@ -150,7 +166,7 @@ original move, with a stop below the last swing and a fixed reward-to-risk targe
                 for f in pending:
                     touched = l[t] <= f["top"] if f["side"] > 0 else h[t] >= f["bottom"]
                     if touched:
-                        if trade is None and signal is None:
+                        if trade is None and signal is None and (trend is None or trend[t] == f["side"]):
                             signal = f                    # newest touched first (see sort below)
                     elif t - f["made"] <= expiry:
                         still.append(f)

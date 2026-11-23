@@ -36,6 +36,10 @@ code to change, no restart: save the file and refresh the browser.
 | Draw a line on the candles | `self.plot("SMA 50", series)` |
 | Draw in the panel below | `self.plot("RSI", series, pane="lower")` |
 | Draw a level (stop, zone edge) as flat steps | `self.plot("Stop", series, style="step")` |
+| RSI / moving averages ready-made | `from quantlab.indicators import rsi, sma, ema` |
+| Higher-timeframe candles (closed only) | `h4 = self.higher(bars, "4h")` then `h4.close`, `h4.high`... |
+| An indicator on a higher timeframe | `self.on_higher(bars, "4h", lambda b: rsi(b.close, 14))` |
+| A pick-one setting (menu) | `Param("4h", choices=("1h", "4h", "1d"), label="Higher timeframe")` |
 | Always invested / always in cash | `pd.Series(1.0, index=bars.index)` / `0.0` |
 | Buy on X, sell on Y, hold in between | `s = pd.Series(float("nan"), index=bars.index); s[X] = 1.0; s[Y] = 0.0; return s.ffill().fillna(0.0)` |
 
@@ -51,6 +55,31 @@ strategies. Trade-based strategies (`self.trade`) can use
 
 **Positions:** `1` = fully invested, `0` = cash, `-1` = fully short, `0.5` = half.
 The position you return for a day is decided at that day's close and earns from the next day.
+
+## Multi-timeframe strategies
+
+Let a higher timeframe set the direction and the chart's own timeframe time the entries:
+
+```python
+from quantlab.indicators import rsi
+
+def compute(self, bars):                      # e.g. on 15-minute candles
+    trend_up = self.on_higher(bars, "4h", lambda b: rsi(b.close, 14)) > 50
+    dip = rsi(bars.close, 14) < 30
+    ...
+```
+
+- `self.higher(bars, tf)` gives the higher timeframe's open/high/low/close/volume on every bar;
+  `self.on_higher(bars, tf, func)` computes an indicator on those candles and lines it up.
+- **Only finished candles:** at 09:00 a strategy sees the 04:00-08:00 4h candle, never the one
+  that ends at 12:00. (`self.higher(bars, tf, forming=True)` gives the candle being built so far,
+  from the bars up to now: also honest.)
+- Don't do it yourself with `bars.close.resample("4h").last()` + forward fill: that leaks the
+  future into the past, and the app's look-ahead check will block the strategy.
+- Candles are built from the chart's own bars (New York clock; 4h bins 0-4-8-12-16-20; days from
+  midnight, pre/after-market included). Make the timeframe a setting with
+  `Param("4h", choices=(...))` so the optimizer can test several (tick-boxes on the Optimize page).
+- Examples: `mtf_rsi.py`, and `fvg.py`'s trend filter.
 
 ## Strategies with stops, targets or exact entry prices
 
@@ -87,5 +116,6 @@ range, assume the stop: daily bars don't show which came first). See `fvg.py`.
 | `donchian_breakout.py` | Example: buy new N-day highs, sell new M-day lows. |
 | `macd.py` | MACD crossover: long (or short) while MACD is above (below) its signal line. |
 | `rsi.py` | RSI reversion: buy oversold, sell the bounce; optional shorts. |
-| `fvg.py` | Fair value gap retest: next-open entry, swing stop, reward:risk target, risk-% sizing, long & short. Uses `self.trade(...)`. |
+| `fvg.py` | Fair value gap retest: next-open entry, swing stop, reward:risk target, risk-% sizing, long & short, optional higher-timeframe trend filter. Uses `self.trade(...)`. |
+| `mtf_rsi.py` | Multi-timeframe RSI: buy short-term dips only while a higher timeframe's RSI shows an up-trend. |
 | `README.md` | This guide. |

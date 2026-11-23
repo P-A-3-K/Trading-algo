@@ -78,6 +78,9 @@ def default_ranges(cls) -> dict:
     """
     out = {}
     for n, (k, p) in enumerate(cls.all_params().items()):
+        if p.is_choice:                                 # pick-one settings: the default only
+            out[k] = [p.default]
+            continue
         if p.is_bool:                                   # yes/no settings: fixed at default
             out[k] = [int(p.default), int(p.default), 1]
             continue
@@ -295,7 +298,10 @@ def sweep_request(query: dict):
         raise ValueError(f"{cls.name} has no settings to sweep. Pick another strategy.")
     ranges = default_ranges(cls)
     for k, p in cls.all_params().items():
-        if f"{k}_from" in query:
+        if p.is_choice and f"{k}_values" in query:      # e.g. trend_tf_values=off,4h
+            picks = [v.strip() for v in query[f"{k}_values"].split(",") if v.strip()]
+            ranges[k] = [p.coerce(k, v) for v in picks] or [p.default]
+        elif f"{k}_from" in query:
             try:
                 ranges[k] = [float(query[f"{k}_from"]), float(query[f"{k}_to"]), float(query[f"{k}_step"])]
             except (KeyError, ValueError):
@@ -361,9 +367,12 @@ def optimize_payload(ticker: str, query: dict) -> dict:
                              costs=cost_model)
         if res.table.empty:
             raise ValueError("No valid combinations: " + (res.skipped[0][1] if res.skipped else "empty grid"))
-        varied = [k for k, (a, b, _) in ranges.items() if b > a]
-        p_int = {k: cls.all_params()[k].is_int or cls.all_params()[k].is_bool for k in ranges}
-        rows = [{k: (clean(v) if k not in ranges else (int(v) if p_int[k] else float(v)))
+        P = cls.all_params()
+        varied = [k for k, r in ranges.items() if optimize.is_varied(r)]
+        def setting(k, v):
+            p = P[k]
+            return str(v) if p.is_choice else int(v) if (p.is_int or p.is_bool) else float(v)
+        rows = [{k: (clean(v) if k not in ranges else setting(k, v))
                  for k, v in row.items()} for row in res.table.to_dict("records")]
         idx = bars.index
         split_pos = idx.get_loc(res.split_date)
@@ -375,7 +384,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
             "benchmark": {k: clean(v) for k, v in res.benchmark.items()},
             "report": {k: (clean(v) if not isinstance(v, str) else v)
                        for k, v in optimize.overfitting_report(res, "sharpe").items()},
-            "axis_values": {k: optimize.values(*ranges[k], p_int[k]) for k in varied},
+            "axis_values": {k: optimize.axis(P[k], ranges[k]) for k in varied},
             "start": str(res.start.date()), "end": str(res.end.date()),
             "split_date": str(res.split_date.date()),
             "split_at": chart.when(res.split_date),      # exact first test bar, for chart links

@@ -26,6 +26,9 @@ one-step trailing, or your own) and it plays them on thousands of simulated futu
 strategy's own results, at several position sizes: pass and fail odds, time to pass, how long a
 funded account survives, and the largest "safe" size. On the Optimize page, rank by
 **Return / yr at 5% drawdown** to look for strategies that suit prop accounts.
+**Multi-timeframe:** strategies can read a higher timeframe's candles (only finished ones, so no
+peeking). Try **MTF RSI** (buy short-term dips while the 4h RSI shows an up-trend) or FVG's
+**Trend filter timeframe**; on the Optimize page, tick several timeframes to test which works.
 **Years of intraday history:** connect a free [Alpaca](https://alpaca.markets) account on the
 app's **Data** page (paste the API key ID and secret; they stay on your computer). Then 5m-4h
 candles go back to 2016 instead of 60 days. Use the **History** menu to choose how much to load.

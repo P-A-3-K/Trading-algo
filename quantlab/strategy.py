@@ -45,10 +45,16 @@ class Param:
     step: Optional[float] = None   # app input step; defaults to 1 for whole numbers
     intraday_only: bool = False    # only shown/used on intraday timeframes
     help: str = ""                 # one-line explanation, shown when hovering the setting
+    choices: Optional[tuple] = None  # a pick-one setting, e.g. ("1h", "4h", "1d"): a menu in the app
+
+    @property
+    def is_choice(self) -> bool:
+        return self.choices is not None
 
     @property
     def is_int(self) -> bool:
-        return isinstance(self.default, (int, np.integer)) and not isinstance(self.default, bool)
+        return (not self.is_choice and isinstance(self.default, (int, np.integer))
+                and not isinstance(self.default, bool))
 
     @property
     def is_bool(self) -> bool:
@@ -56,6 +62,11 @@ class Param:
 
     def coerce(self, name: str, value):
         """Convert and range-check a value, with a clear error message."""
+        if self.is_choice:                        # pick-one settings
+            v = str(value).strip()
+            if v not in self.choices:
+                raise ValueError(f"{name} must be one of {', '.join(self.choices)}; got {value!r}")
+            return v
         if self.is_bool:                          # yes/no settings
             if isinstance(value, str):
                 v = value.strip().lower()
@@ -77,10 +88,13 @@ class Param:
         return value
 
     def describe(self) -> dict:
-        kind = "bool" if self.is_bool else "int" if self.is_int else "float"
-        return {"default": self.default, "min": self.min, "max": self.max,
-                "label": self.label, "step": self.step or (1 if self.is_int else None),
-                "type": kind, "intraday_only": self.intraday_only, "help": self.help}
+        kind = "choice" if self.is_choice else "bool" if self.is_bool else "int" if self.is_int else "float"
+        out = {"default": self.default, "min": self.min, "max": self.max,
+               "label": self.label, "step": self.step or (1 if self.is_int else None),
+               "type": kind, "intraday_only": self.intraday_only, "help": self.help}
+        if self.is_choice:
+            out["choices"] = list(self.choices)
+        return out
 
 
 # Settings every strategy gets automatically (on top of its own `params`)
@@ -186,6 +200,24 @@ class Strategy:
 
     def compute(self, bars: pd.DataFrame) -> pd.Series:
         raise NotImplementedError("A strategy must implement compute(bars)")
+
+    # ---- Multi-timeframe (see quantlab/mtf.py) ----------------------------------------
+    def higher(self, bars: pd.DataFrame, tf: str, forming: bool = False) -> pd.DataFrame:
+        """Higher-timeframe candles ("15m", "30m", "1h", "4h", "1d") for every bar.
+
+        By default each bar sees the last CLOSED higher candle (no peeking at a
+        candle that's still forming). forming=True: the candle being built so far.
+            h4 = self.higher(bars, "4h");  trend_up = h4.close > h4.open
+        """
+        from .mtf import higher
+        return higher(bars, tf, forming)
+
+    def on_higher(self, bars: pd.DataFrame, tf: str, func) -> pd.Series:
+        """An indicator computed on closed higher-timeframe candles, for every bar.
+            rsi_4h = self.on_higher(bars, "4h", lambda b: rsi(b.close, 14))
+        """
+        from .mtf import on_higher
+        return on_higher(bars, tf, func)
 
     def plot(self, name: str, values: pd.Series, pane: str = "price", color: str = None,
              style: str = "line"):

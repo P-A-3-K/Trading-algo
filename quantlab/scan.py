@@ -109,7 +109,7 @@ def scan(cls, ranges: dict, markets: list, split: float = 0.7, rank: str = "shar
     if total > MAX_BACKTESTS:
         raise ValueError(f"{len(markets)} markets x {len(combos):,} combinations = {total:,} backtests "
                          f"(max {MAX_BACKTESTS:,}). Use bigger steps, or fewer tickers or timeframes.")
-    params = [k for k, (a, b, _) in ranges.items() if b > a] or list(ranges)[:1]
+    params = [k for k, r in ranges.items() if optimize.is_varied(r)] or list(ranges)[:1]
     t0 = time.time()
     out, per_setting = [], {}
     for m, (ticker, tf) in enumerate(markets):
