@@ -778,7 +778,8 @@ function drawScan(R) {
   const sweepUrl = m => `/optimize?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&mode=split&split=${R.split}&rank=${R.rank}` +
     rangeQuery() + costQuery(A.costs) + "&run=1";
   const chartUrl = m => `/?ticker=${encodeURIComponent(m.ticker)}&tf=${m.tf}&strategy=${S.id}&` +
-    Object.entries(m.settings || {}).map(([k, v]) => `${k}=${v}`).join("&") + costQuery(A.costs);
+    Object.entries(m.settings || {}).map(([k, v]) => `${k}=${v}`).join("&") + costQuery(A.costs) +
+    `&test_from=${encodeURIComponent(m.split)}`;
   const median = xs => { const v = xs.filter(x => x !== null).sort((a, b) => a - b); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; };
 
   // ---- Verdict ----
@@ -1029,8 +1030,9 @@ if (RES && RES.mode !== "wf") {
   const rows = RES.rows, bench = RES.benchmark, varied = RES.params;
   const rk = A.rank, M = METRICS[rk];
   const sign = M.better === "higher" ? -1 : 1;              // sort direction for "best first"
+  // test_from: the chart then shows the training and test (unseen) periods separately
   const chartUrl = r => `/?ticker=${encodeURIComponent(DATA.ticker)}&tf=${TF}&strategy=${S.id}&` +
-    params.map(([k]) => `${k}=${r[k]}`).join("&") + costQuery(A.costs);
+    params.map(([k]) => `${k}=${r[k]}`).join("&") + costQuery(A.costs) + `&test_from=${encodeURIComponent(RES.split_at)}`;
 
   // Verdict: did the in-sample winners hold up?
   const O = RES.report, v = document.getElementById("verdict");

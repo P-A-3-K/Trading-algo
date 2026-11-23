@@ -227,6 +227,7 @@ def optimize_payload(ticker: str, query: dict) -> dict:
             "axis_values": {k: optimize.values(*ranges[k], p_int[k]) for k in varied},
             "start": str(res.start.date()), "end": str(res.end.date()),
             "split_date": str(res.split_date.date()),
+            "split_at": chart.when(res.split_date),      # exact first test bar, for chart links
             "split_before": str(idx[split_pos - 1].date()),
         }
     return payload
@@ -380,7 +381,8 @@ class Handler(BaseHTTPRequestHandler):
         strategy = strategy_from_query(query)
         cost_name, cost_model = costs_of(query)
         payload = chart.build_payload(ticker, strategy, timeframe=timeframe_of(query),
-                                      costs=cost_model)
+                                      costs=cost_model,
+                                      test_from=(query.get("test_from") or None) if strategy else None)
         # What the control bar needs: menus, and the current choice to pre-select
         payload["app"] = {
             "strategy": type(strategy).__name__ if strategy else "none",
@@ -437,7 +439,8 @@ class Handler(BaseHTTPRequestHandler):
         ticker = query.get("ticker") or DEFAULT_TICKER
         self.send_json(chart.build_payload(ticker, strategy_from_query(query),
                                            timeframe=timeframe_of(query),
-                                           costs=costs_of(query)[1]))
+                                           costs=costs_of(query)[1],
+                                           test_from=query.get("test_from") or None))
 
     def no_content(self, query):
         self.send_response(HTTPStatus.NO_CONTENT)

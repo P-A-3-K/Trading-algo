@@ -43,7 +43,8 @@ def _num(v):
 
 
 def _when(ts) -> str:
-    return ts.strftime("%Y-%m-%d %H:%M") if ts.tzinfo is not None and (ts.hour or ts.minute) else str(ts.date())
+    from .chart import when
+    return when(ts)
 
 
 def _pick(table: pd.DataFrame, rank: str) -> pd.Series:

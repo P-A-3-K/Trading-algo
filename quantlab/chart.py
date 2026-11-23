@@ -194,17 +194,44 @@ PAGE = """<!doctype html>
 """
 
 
-def cost_summary(bt, start: float = START_CAPITAL) -> dict:
-    """Return per year before costs, and total $ paid in costs (from a BacktestResult)."""
+def cost_summary(bt, start: float = START_CAPITAL, part: slice = slice(None)) -> dict:
+    """Return per year before costs, and total $ paid in costs (from a BacktestResult).
+
+    part: only these bars (e.g. the test period), as if $10,000 started there."""
     from .metrics import cagr
-    paid = bt.costs if bt.costs is not None else pd.Series(0.0, index=bt.returns.index)
-    equity_before = start * bt.equity.shift(1).fillna(1.0)
-    return {"cagr_gross": cagr(bt.returns + paid), "costs_paid": float((paid * equity_before).sum())}
+    r = bt.returns.iloc[part]
+    paid = (bt.costs if bt.costs is not None else pd.Series(0.0, index=bt.returns.index)).iloc[part]
+    equity_before = start * (1 + r).cumprod().shift(1).fillna(1.0)
+    return {"cagr_gross": cagr(r + paid), "costs_paid": float((paid * equity_before).sum())}
+
+
+def when(ts) -> str:
+    """A bar's time as text: '2024-03-01' for daily bars, '2024-03-01 09:30' intraday."""
+    ts = pd.Timestamp(ts)
+    return ts.strftime("%Y-%m-%d %H:%M") if (ts.hour or ts.minute) else str(ts.date())
+
+
+def split_index(index: pd.DatetimeIndex, test_from) -> int:
+    """Position of the first bar at or after `test_from` (text like '2015-06-01 09:30')."""
+    ts = pd.Timestamp(test_from)
+    if index.tz is not None and ts.tz is None:
+        ts = ts.tz_localize(index.tz)
+    elif index.tz is None and ts.tz is not None:
+        ts = ts.tz_localize(None)
+    return int(index.searchsorted(ts))
+
+
+MIN_PERIOD_BARS = 20
 
 
 def build_payload(ticker: str, strategy=None, adjusted: bool = True,
-                  timeframe: str = "1d", costs=None) -> dict:
+                  timeframe: str = "1d", costs=None, test_from=None) -> dict:
     """Everything the chart page shows, for one ticker, timeframe and optional strategy.
+
+    test_from: where the optimizer's test (out-of-sample) period started, when the
+    settings were opened from a sweep. Stats and the luck check are then also given
+    for the training part and the test part separately: only the test part is
+    honest, because the settings were picked on the training part.
 
     Used both for saved report files and by the web app (quantlab.app).
     """
@@ -221,6 +248,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
         df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
     bpd = bars_per_day(df.index)
     plots, fills, equity, stats, luck, label = [], None, None, None, None, ""
+    periods, split = None, None
     if strategy is not None:
         from .backtest import fills_of, run_backtest, simulate
         from .metrics import full_stats
@@ -234,14 +262,32 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
         strat = simulate(bars, out, costs=prepared)
         bench = run_backtest(bars["close"], pd.Series(1.0, index=bars.index), costs=prepared)
         equity = equity_payload(strat.returns, bench.returns)
-        s_st = {**full_stats(strat.returns, strat.positions, len(fills)), **cost_summary(strat)}
-        b_st = {**full_stats(bench.returns, bench.positions, 1), **cost_summary(bench)}
-        for st in (s_st, b_st):                    # bar counts -> trading days
-            for k in ("longest_drawdown_days", "avg_days_held"):
-                if st.get(k) is not None:
-                    st[k] = st[k] / bpd
-        stats = stats_payload(s_st, b_st)
+        def period_stats(part=slice(None)):
+            r, held = strat.returns.iloc[part], strat.positions.iloc[part]
+            n_fills = int(fills["date"].between(r.index[0], r.index[-1]).sum()) if len(fills) else 0
+            s_st = {**full_stats(r, held, n_fills), **cost_summary(strat, part=part)}
+            b_st = {**full_stats(bench.returns.iloc[part], bench.positions.iloc[part], 1),
+                    **cost_summary(bench, part=part)}
+            for st in (s_st, b_st):                # bar counts -> trading days
+                for k in ("longest_drawdown_days", "avg_days_held"):
+                    if st.get(k) is not None:
+                        st[k] = st[k] / bpd
+            return stats_payload(s_st, b_st)
+
+        stats = period_stats()
         luck = luck_payload(strat.returns, bench.returns)
+        if test_from:
+            cut = split_index(bars.index, test_from)
+            if cut < MIN_PERIOD_BARS or len(bars) - cut < MIN_PERIOD_BARS:
+                raise ValueError(f"The test period starting {test_from} leaves under {MIN_PERIOD_BARS} bars "
+                                 "on one side; open the chart without it.")
+            idx = bars.index
+            split = {"time": tkey(idx[cut]), "label": when(idx[cut]),
+                     "train": [when(idx[0]), when(idx[cut - 1])], "test": [when(idx[cut]), when(idx[-1])]}
+            periods = {"all": {"stats": stats, "luck": luck}}
+            for name, part in (("train", slice(None, cut)), ("test", slice(cut, None))):
+                periods[name] = {"stats": period_stats(part),
+                                 "luck": luck_payload(strat.returns.iloc[part], bench.returns.iloc[part])}
         label = repr(strategy)
         adjusted = adjusted if intraday else True  # daily strategies run on adjusted bars
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
@@ -249,7 +295,8 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
             "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,
             "is_index": ticker.startswith("^"),
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
-            "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck}
+            "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck,
+            "split": split, "periods": periods}
 
 
 def render_payload(payload: dict, page_title: str = None) -> str:

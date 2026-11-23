@@ -164,3 +164,19 @@ def test_market_scan_runs_in_the_background(server):
                        "&slow_from=5&slow_to=500&slow_step=10&tickers=" + ",".join(f"T{i}" for i in range(30)) + "&tfs=1d")
     assert status == 400 and "max" in json.loads(body)["error"]
     assert get(server + "/api/scan/status?id=999")[0] == 400
+
+
+def test_chart_splits_training_and_test_periods(server):
+    plain = json.loads(get(server + "/api/backtest?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30")[1])
+    mid = plain["bars"][200]["time"]                       # a date inside the synthetic data
+    status, body = get(server + f"/api/backtest?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30&test_from={mid}")
+    assert status == 200, body
+    d = json.loads(body)
+    assert d["split"]["test"][0] == mid and d["split"]["train"][1] < mid
+    assert set(d["periods"]) == {"all", "train", "test"}
+    sharpe = {p: next(r["strategy"] for r in d["periods"][p]["stats"] if r["key"] == "sharpe") for p in d["periods"]}
+    assert sharpe["train"] != sharpe["test"]
+    # without test_from: no split; a split leaving almost nothing on one side is refused
+    assert plain["split"] is None
+    status, body = get(server + "/api/backtest?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30&test_from=2035-01-01")
+    assert status == 400 and "test period" in json.loads(body)["error"]

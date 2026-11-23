@@ -67,3 +67,23 @@ def test_scan_limits_and_cancel():
             raise scan.Cancelled()
     with pytest.raises(scan.Cancelled):
         scan.scan(SmaCrossover, {"fast": (10, 30, 10)}, [("AAA", "1d")], load=fake_load, progress=stop)
+
+
+def test_chart_test_period_matches_the_sweep_out_of_sample(tmp_path, monkeypatch):
+    from quantlab import chart
+    from quantlab import download as dl
+    c = synthetic_prices(n_days=900, seed=5)
+    df = pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99, "Close": c, "Adj Close": c,
+                       "Volume": 1000}, index=c.index.rename("Date"))
+    df.to_csv(tmp_path / "TEST.csv")
+    monkeypatch.setattr(dl, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(dl, "fetch", lambda t: (_ for _ in ()).throw(RuntimeError("offline")))
+    bars = dl.load_bars("TEST")
+    from quantlab.costs import CostModel
+    res = optimize.sweep(bars, SmaCrossover, {"fast": (20, 20, 1), "slow": (60, 60, 1)}, 0.5, costs=CostModel())
+    row = res.table.iloc[0]
+    p = chart.build_payload("TEST", SmaCrossover(fast=20, slow=60), test_from=chart.when(res.split_date))
+    get = lambda period, key: next(r["strategy"] for r in p["periods"][period]["stats"] if r["key"] == key)
+    assert get("test", "sharpe") == pytest.approx(row["oos_sharpe"])
+    assert get("train", "sharpe") == pytest.approx(row["is_sharpe"])
+    assert get("test", "final_value") == pytest.approx(row["oos_final"])
