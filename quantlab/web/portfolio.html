@@ -142,6 +142,7 @@ footer { color: var(--muted); font-size: 12px; }
       <button type="button" id="saveBtn">Save</button>
       <label class="field"><span>Saved portfolios</span><select id="loadIn"><option value="">–</option></select></label>
       <button type="button" id="delBtn">Delete</button>
+      <label class="field"><span>Examples</span><select id="exampleIn"><option value="">–</option></select></label>
     </div>
   </section>
 
@@ -357,6 +358,18 @@ const EXAMPLE = [
   { ticker: "GLD", tf: "1d", strategy: "SmaCrossover", settings: { fast: 25, slow: 150 }, weight: 50 },
   { ticker: "SPY", tf: "1d", strategy: "RsiReversion", settings: { period: 2, buy_below: 10, sell_above: 70 }, weight: 50 },
 ];
+const EXAMPLES = {
+  "Diversified trend: 6 asset classes (time-series momentum)": ["SPY", "EFA", "TLT", "IEF", "GLD", "DBC"].map(t =>
+    ({ ticker: t, tf: "1d", strategy: "TimeSeriesMomentum", settings: {}, weight: 16.7 })),
+  "Gold trend + S&P dip-buying": EXAMPLE,
+  "Opening range breakout: SPY + QQQ + IWM (5m)": ["SPY", "QQQ", "IWM"].map(t =>
+    ({ ticker: t, tf: "5m", strategy: "OpeningRangeBreakout", settings: {}, weight: 33.3 })),
+  "Trend + dip + intraday: one of each": [
+    { ticker: "GLD", tf: "1d", strategy: "TimeSeriesMomentum", settings: {}, weight: 25 },
+    { ticker: "TLT", tf: "1d", strategy: "TimeSeriesMomentum", settings: {}, weight: 25 },
+    { ticker: "QQQ", tf: "1d", strategy: "IndexDip", settings: {}, weight: 25 },
+    { ticker: "SPY", tf: "5m", strategy: "OpeningRangeBreakout", settings: {}, weight: 25 }],
+};
 function initialLegs() {
   const q = new URLSearchParams(location.search).get("legs");
   if (q) { try { const v = JSON.parse(q); if (Array.isArray(v) && v.length) return v; } catch (e) {} }
@@ -446,6 +459,12 @@ function refreshSaved() {
   document.getElementById("loadIn").innerHTML = `<option value="">–</option>` + Object.keys(all).sort().map(n => `<option>${esc(n)}</option>`).join("");
 }
 refreshSaved();
+const exampleIn = document.getElementById("exampleIn");
+exampleIn.innerHTML += Object.keys(EXAMPLES).map(n => `<option>${esc(n)}</option>`).join("");
+exampleIn.addEventListener("change", () => {
+  const ex = EXAMPLES[exampleIn.value]; if (!ex) return;
+  LEGS = JSON.parse(JSON.stringify(ex)); drawLegs(); store.set(DRAFT, LEGS); exampleIn.value = "";
+});
 document.getElementById("saveBtn").addEventListener("click", () => {
   const n = document.getElementById("saveName").value.trim(); if (!n) return document.getElementById("saveName").focus();
   const all = store.get(SAVED, {}); all[n] = LEGS; store.set(SAVED, all); refreshSaved(); document.getElementById("loadIn").value = n;
