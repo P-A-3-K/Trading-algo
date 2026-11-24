@@ -984,7 +984,15 @@ function renderStats() {
     pct: v => (v * 100).toFixed(1) + "%",
     num: v => v.toFixed(2),
     int: v => Math.round(v).toLocaleString(),
-    days: v => v >= 252 ? (v / 252).toFixed(1) + " yrs" : Math.round(v) + " days",
+    days: v => {
+      // intraday: under a day -> hours / minutes (v counts trading days of bars)
+      const barMin = { "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240 }[DATA.timeframe];
+      if (barMin && v < 1) {
+        const mins = v * (DATA.bars_per_day || 1) * barMin;
+        return mins < 90 ? Math.max(1, Math.round(mins)) + " min" : (mins / 60).toFixed(1) + " hours";
+      }
+      return v >= 252 ? (v / 252).toFixed(1) + " yrs" : v < 10 ? v.toFixed(1) + " days" : Math.round(v) + " days";
+    },
   };
   const show = (v, f) => v === null || v === undefined ? "–" : F[f](v);
   const tbody = document.querySelector("#stats tbody");
