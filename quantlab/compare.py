@@ -7,7 +7,7 @@ Each strategy is a name plus optional settings (name key=value ...), in quotes.
 Prints return after and before costs, Sharpe, worst drawdown, time in market,
 round trips, win rate and costs, plus buy & hold. Realistic costs.
 --hist: intraday history to use (60d, 6m, 1y, 2y, 5y, all; default all).
---from: only the last part, e.g. --from 2020-01-01.
+--from / --to: only part of the history, e.g. --from 2022-01-01 --to 2024-06-01.
 Costs (default: realistic): --cost realistic|flat5|none|expensive, or adjust the realistic
 model with --spread 0.2 (half-spread in bp, regular hours), --slip 0.02 (share of the bar's
 range), --commission 0.5 (bp per trade).
@@ -28,7 +28,7 @@ def parse_strategy(text: str):
 
 
 def compare(ticker: str, timeframe: str, specs: list, history: str = "all", start=None,
-            costs=None) -> pd.DataFrame:
+            costs=None, end=None) -> pd.DataFrame:
     from .backtest import run_backtest, simulate
     from .chart import cost_summary
     from .costs import CostModel
@@ -39,6 +39,11 @@ def compare(ticker: str, timeframe: str, specs: list, history: str = "all", star
         if bars.index.tz is not None and ts.tz is None:
             ts = ts.tz_localize(bars.index.tz)
         bars = bars[bars.index >= ts]
+    if end:
+        ts = pd.Timestamp(end)
+        if bars.index.tz is not None and ts.tz is None:
+            ts = ts.tz_localize(bars.index.tz)
+        bars = bars[bars.index < ts]
     costs = costs or CostModel()
     prepared = costs.prepare(bars)
     rows = []
@@ -84,6 +89,7 @@ def main(argv=None):
     ap.add_argument("strategies", nargs="+", help='e.g. "MtfRsi htf=1d" RsiReversion')
     ap.add_argument("--hist", default="all", help="intraday history: 60d 6m 1y 2y 5y all")
     ap.add_argument("--from", dest="start", default=None, help="start date, e.g. 2020-01-01")
+    ap.add_argument("--to", dest="end", default=None, help="end date (not included), e.g. 2024-06-01")
     ap.add_argument("--cost", default="realistic", help="realistic, flat5, none or expensive")
     ap.add_argument("--spread", type=float, help="half-spread in bp (regular hours)")
     ap.add_argument("--slip", type=float, help="slippage as a share of the bar's range, e.g. 0.02")
@@ -99,7 +105,7 @@ def main(argv=None):
                                  ("commission_bps", a.commission)) if v is not None}
     if tweaks:
         model = replace(model, **tweaks)
-    print(show(compare(a.ticker, a.timeframe, a.strategies, a.hist, a.start, model)))
+    print(show(compare(a.ticker, a.timeframe, a.strategies, a.hist, a.start, model, a.end)))
 
 
 if __name__ == "__main__":
