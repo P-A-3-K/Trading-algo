@@ -28,8 +28,10 @@ def test_slippage_scales_with_bar_range_and_spread_with_hours():
     b = daily_bars()
     calm, wild = b.copy(), b.copy()
     wild["high"], wild["low"] = b["close"] * 1.05, b["close"] * 0.95
-    m = CostModel(impact=0)
-    assert m.prepare(wild).linear.mean() > m.prepare(calm).linear.mean() * 4
+    m = CostModel(impact=0, spread_bps=0, extended_spread_bps=0)
+    assert m.prepare(wild).linear.mean() == pytest.approx(m.prepare(calm).linear.mean() * 5)
+    # daily candles: slippage of a 5-minute candle (day range scaled by sqrt(5 / 390))
+    assert m.prepare(calm).linear.mean() == pytest.approx(0.05 * 0.02 * (5 / 390) ** 0.5)
     # intraday: wider spread outside 9:30-16:00
     idx = pd.date_range("2026-03-02 09:00", "2026-03-02 17:00", freq="5min", tz=NY)
     ib = pd.DataFrame({"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0, "volume": 1.0}, index=idx)

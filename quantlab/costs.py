@@ -25,7 +25,7 @@ class CostModel:
     commission_bps: float = 0.0       # broker fee per trade
     spread_bps: float = 1.0           # half-spread, regular hours (9:30-16:00)
     extended_spread_bps: float = 10.0 # half-spread, pre-market / after-hours
-    slippage_range: float = 0.05      # x typical bar range (0.05 = 5% of it)
+    slippage_range: float = 0.05      # x typical 5-minute range (longer bars scaled by sqrt(time))
     impact: float = 0.1               # square-root impact coefficient (0 = off)
     account: float = 10_000.0         # account size in $ (for impact)
     bar_spread: bool = True           # use each bar's own spread when the data has one (MT5)
@@ -67,7 +67,14 @@ class CostModel:
         else:                                     # close-only data: use moves instead
             rng = close.pct_change().abs() * 2
         typical = rng.rolling(20, min_periods=1).median().fillna(0).to_numpy()
-        linear = linear + self.slippage_range * typical
+        # An order slips by a share of a 5-minute candle's range whatever the chart's timeframe:
+        # longer candles are scaled down by sqrt(time) (a day = 390 regular-hours minutes)
+        if intraday and len(idx) > 1:
+            minutes = pd.Series(idx[1:] - idx[:-1]).median().total_seconds() / 60
+        else:
+            minutes = 390.0
+        scale = min(1.0, (5.0 / max(minutes, 1e-9)) ** 0.5)
+        linear = linear + self.slippage_range * typical * scale
 
         # impact: volatility x sqrt(order / average daily dollar volume)
         k = np.zeros(len(idx))
