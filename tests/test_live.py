@@ -202,4 +202,4 @@ def test_leftover_trade_from_an_earlier_day_is_closed(tmp_path):
     trader.check_account()
     trader.step(path.index[0].to_pydatetime())
     j = pd.read_csv(tmp_path / "journal.csv")
-    assert not broker.positions_ and not broker.orders_ and "left over" in " ".join(j["note"].astype(str))
+    assert not broker.positions_ and not broker.orders_ and "left over" in " ".join(str(x) for x in j["note"].fillna(""))
