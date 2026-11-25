@@ -39,6 +39,10 @@ logged in (e.g. FTMO), then `.venv\Scripts\python -m quantlab.mt5 download US100
 `MT5:US100.cash` as a ticker anywhere: real per-candle spreads and overnight swaps are included.
 **Import candles from CSV** (e.g. Dukascopy's historical data export, or an MT5 export):
 `python -m quantlab.importer GER40 GER40_2016.csv GER40_2017.csv` then use `CSV:GER40` as a ticker.
+**Automatic trader (forward test):** `python -m quantlab.live init`, edit `data/live/live.json`
+(symbols, weights, size), switch on MT5's "Algo Trading" button, then `python -m quantlab.live run --dry-run`
+(logs only) or `run` (trades the demo account MT5 is logged into). Opening range breakout legs, guards for
+daily and total loss, a journal in `data/live/journal.csv`; `python -m quantlab.live stop` ends it.
 **Multi-timeframe:** strategies can read a higher timeframe's candles (only finished ones, so no
 peeking). Try **MTF RSI** (buy short-term dips while the 4h RSI shows an up-trend) or FVG's
 **Trend filter timeframe**; on the Optimize page, tick several timeframes to test which works.
@@ -87,6 +91,7 @@ pytest -q
 | `quantlab/portfolio.py` | Several strategies in one account: legs combined daily by weight over their common period; correlation, equal-risk weights; prop check on the whole |
 | `quantlab/mt5.py` | MetaTrader 5: download a broker's / prop firm's 5m and daily candles with spreads, swap rates; server time -> New York |
 | `quantlab/importer.py` | Import 1-minute or 5-minute candles from CSV (Dukascopy export, MT5 export, generic) as `CSV:` tickers |
+| `quantlab/live.py` | Automatic trader for MT5: ORB legs live (range, stop orders, one-cancels-other, flat before the close), sizing, loss guards, journal |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |
