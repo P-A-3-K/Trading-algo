@@ -118,7 +118,8 @@ range, assume the stop: daily bars don't show which came first). See `fvg.py`.
 | `rsi.py` | RSI reversion: buy oversold, sell the bounce; optional shorts. |
 | `fvg.py` | Fair value gap retest: next-open entry, swing stop, reward:risk target, risk-% sizing, long & short, optional higher-timeframe trend filter. Uses `self.trade(...)`. |
 | `index_dip.py` | Index dip-buying: IBS or RSI(2) dips above the 200-day average, sell the bounce (daily, SPY/QQQ...). |
-| `orb.py` | Opening range breakout: trade the first break of the first 30 minutes' range, stop at the other side, flat at the close (intraday). |
+| `orb.py` | Opening range breakout: trade the first break of the first 30 minutes' range, stop at the other side, flat at the close (intraday). Sessions: US, Europe, London, Tokyo, each on its own clock. |
+| `intraday_momentum.py` | Intraday momentum: the move from yesterday's close to 10:00 sets the direction of a trade from 15:30 to the close. |
 | `ts_momentum.py` | Time-series momentum: hold while the past 12 months' return is positive, checked monthly. Best across many asset classes on the Portfolio page. |
 | `mtf_rsi.py` | Multi-timeframe RSI: buy short-term dips only while a higher timeframe's RSI shows an up-trend. |
 | `README.md` | This guide. |

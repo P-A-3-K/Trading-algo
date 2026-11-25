@@ -84,3 +84,45 @@ def test_no_lookahead(name, kw):
         c = synthetic_prices(n_days=800, seed=4)
         bars = pd.DataFrame({"open": c, "high": c * 1.01, "low": c * 0.99, "close": c, "volume": 1.0})
     assert check_no_lookahead(strategies.get(name)(**kw), bars, checks=25) == []
+
+
+def two_days(close_day1=100.0, day2_10am=101.0, day2_1530=101.0, day2_close=101.5, tz="America/New_York"):
+    """Day 1 flat at close_day1; day 2 rises to day2_10am by 10:00, sits until 15:30, then moves."""
+    frames = []
+    for d, path in (("2024-03-04", None), ("2024-03-05", True)):
+        idx = pd.date_range(f"{d} 09:30", periods=78, freq="5min", tz=tz)
+        px = np.full(78, close_day1)
+        if path:
+            px[5:] = day2_10am                       # bar ending 10:00 closes at day2_10am
+            px[71:] = day2_1530                      # bar ending 15:30 (index 71)
+            px[77] = day2_close                      # last bar (15:55-16:00)
+        frames.append(pd.DataFrame({"open": px, "high": px + 0.01, "low": px - 0.01, "close": px, "volume": 1.0}, index=idx))
+    return pd.concat(frames)
+
+
+def test_intraday_momentum_trades_the_last_half_hour():
+    bars = two_days()
+    pos = strategies.get("IntradayMomentum")().run(bars).positions
+    held = pos[pos != 0]
+    assert set(held) == {1.0}                                          # up signal: long
+    assert held.index[0].strftime("%H:%M") == "15:25" and held.index[-1].strftime("%H:%M") == "15:50"
+    down = strategies.get("IntradayMomentum")().run(two_days(day2_10am=99.0, day2_1530=99.0)).positions
+    assert set(down[down != 0]) == {-1.0}
+    assert (strategies.get("IntradayMomentum")(allow_short=False).run(two_days(day2_10am=99.0)).positions == 0).all()
+    assert (strategies.get("IntradayMomentum")(min_move_pct=2.0).run(bars).positions == 0).all()   # +1% < 2%
+    from quantlab.backtest import simulate
+    from quantlab.costs import flat
+    r = simulate(bars, strategies.get("IntradayMomentum")().run(bars), costs=flat(0).prepare(bars)).returns
+    assert r.sum() == pytest.approx(101.5 / 101.0 - 1)                 # earned exactly 15:30 -> 16:00
+    assert check_no_lookahead(strategies.get("IntradayMomentum")(), bars, checks=40) == []
+
+
+def test_orb_sessions_use_their_own_clock():
+    d = flat_day("2024-03-04")                                        # 78 bars from 9:30
+    berlin = d.copy()
+    berlin.index = pd.date_range("2024-03-04 09:00", periods=78, freq="5min", tz="Europe/Berlin").tz_convert("America/New_York")
+    berlin.iloc[6] = [100.0, 100.3, 99.95, 100.3, 1.0]               # 09:30 Berlin bar breaks the range
+    berlin.iloc[7:] = [[100.4, 100.45, 100.35, 100.4, 1.0]] * (len(berlin) - 7)
+    t = strategies.get("OpeningRangeBreakout")(session="Europe").run(berlin).trades
+    assert len(t) == 1 and t[0].entry_date.tz_convert("Europe/Berlin").strftime("%H:%M") == "09:30"
+    assert strategies.get("OpeningRangeBreakout")(session="US").run(berlin).trades == []   # wrong clock: no full US range

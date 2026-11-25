@@ -17,6 +17,13 @@ import pandas as pd
 from quantlab.strategy import Param, Strategy
 
 OPEN, CLOSE = 9 * 60 + 30, 16 * 60
+# Trading sessions on their own exchange's clock: (time zone, open, close) in minutes
+SESSIONS = {
+    "US": ("America/New_York", 9 * 60 + 30, 16 * 60),        # US100, US500, US2000, SPY, QQQ...
+    "Europe": ("Europe/Berlin", 9 * 60, 17 * 60 + 30),       # GER40, EU50, FRA40 (Xetra / Eurex hours)
+    "London": ("Europe/London", 8 * 60, 16 * 60 + 30),       # UK100
+    "Tokyo": ("Asia/Tokyo", 9 * 60, 15 * 60),                # JP225 (lunch break ignored)
+}
 
 
 class OpeningRangeBreakout(Strategy):
@@ -24,6 +31,9 @@ class OpeningRangeBreakout(Strategy):
     description = ("Intraday: trade the first break of the opening range's high or low, stop at the "
                    "other side (or middle), target at a reward:risk multiple, flat at the close.")
     params = {
+        "session": Param("US", choices=tuple(SESSIONS), label="Session",
+                         help="Whose opening range: US 9:30-16:00 New York, Europe 9:00-17:30 Frankfurt, "
+                              "London 8:00-16:30, Tokyo 9:00-15:00, each on its own local clock."),
         "range_minutes": Param(30, 5, 120, "Opening range (minutes)", step=5,
                                help="How long after 9:30 the range is measured. Use candles shorter than this (5m or 15m)."),
         "rr": Param(2.0, 0.0, 10.0, "Take profit (reward:risk, 0 = none)", step=0.5,
@@ -42,7 +52,8 @@ move. This strategy trades that **first break**, with a stop on the other side, 
 **flat by the close**: no overnight risk, which suits prop-firm rules.
 
 ## The rules
-- **Range**: high and low of the regular-hours bars in the first *Opening range* minutes (9:30 to 10:00 for 30).
+- **Session**: US (9:30-16:00 New York), Europe (9:00-17:30 Frankfurt), London (8:00-16:30) or Tokyo (9:00-15:00), on that market's own clock, daylight saving included.
+- **Range**: high and low of the session's bars in the first *Opening range* minutes (9:30 to 10:00 for 30 in the US).
 - **Entry**: the first bar after the range that trades above the high (long) or below the low (short; if allowed). Filled at the range edge, or at the bar's open if it gapped past it.
 - **Stop**: the other side of the range, or its middle. **Target**: *RR* x the risk (0 = none).
 - **Exit**: at the stop or target during the day; otherwise at the close of the last regular-hours bar.
@@ -73,11 +84,13 @@ move. This strategy trades that **first break**, with a stop on the other side, 
             self._lines(bars, rng_hi, rng_lo, stop_line, tgt_line)
             return None                                  # daily candles: no opening range, no trades
         o, h, l, c = (bars[k].to_numpy(dtype=float).tolist() for k in ("open", "high", "low", "close"))
-        minutes = (idx.hour * 60 + idx.minute).to_numpy()
+        tz, OPEN, CLOSE = SESSIONS[self.session]
+        local = idx.tz_convert(tz)                                  # the session's own clock
+        minutes = (local.hour * 60 + local.minute).to_numpy()
         step = int(pd.Series(idx[1:] - idx[:-1]).median().total_seconds() // 60) or 5
         regular = (minutes >= OPEN) & (minutes < CLOSE)
         in_range = regular & (minutes + step <= OPEN + self.range_minutes)     # bar ENDS within the range
-        day = pd.factorize(pd.Index(idx.date))[0]
+        day = pd.factorize(pd.Index(local.date))[0]
         rr, risk_pct, shorts, mid = self.rr, self.risk_pct, self.allow_short, self.stop_at == "middle"
 
         reg_idx = np.flatnonzero(regular)
