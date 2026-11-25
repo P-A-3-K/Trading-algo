@@ -201,8 +201,8 @@ footer { color: var(--muted); font-size: 12px; }
   <form class="card appbar" id="form" method="get" action="/optimize">
     <span class="brand">QuantLab</span>
     <label class="field"><span>Ticker</span>
-      <input id="tickerIn" name="ticker" autocomplete="off" spellcheck="false" maxlength="16" required
-             pattern="\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14}"></label>
+      <input id="tickerIn" name="ticker" autocomplete="off" spellcheck="false" maxlength="40" required
+             pattern="(\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14})|([Mm][Tt]5:[A-Za-z0-9][A-Za-z0-9._\-#]{0,30})"></label>
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field" id="histField" hidden title="How far back to load intraday candles"><span>History</span><select id="histIn" name="hist"></select></label>
     <label class="field"><span>Strategy</span><select id="stratIn" name="strategy"></select></label>
@@ -229,7 +229,7 @@ footer { color: var(--muted); font-size: 12px; }
       <h3>Markets <small id="mkCount"></small></h3>
       <div class="mk-row">
         <label class="field"><span>Add ticker</span>
-          <input id="addTicker" autocomplete="off" spellcheck="false" maxlength="16"></label>
+          <input id="addTicker" autocomplete="off" spellcheck="false" maxlength="40"></label>
         <div class="chips" id="chips" aria-live="polite"></div>
       </div>
       <div class="quick" id="quick"></div>

@@ -203,7 +203,7 @@ footer a { color: inherit; }
     <span class="brand">QuantLab</span>
     <label class="field"><span>Ticker</span>
       <input id="tickerIn" name="ticker" autocomplete="off" spellcheck="false"
-             maxlength="16" required pattern="\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14}"
+             maxlength="40" required pattern="(\^?[A-Za-z0-9][A-Za-z0-9.\-=]{0,14})|([Mm][Tt]5:[A-Za-z0-9][A-Za-z0-9._\-#]{0,30})"
              title="A ticker symbol, e.g. SPY, AAPL, BRK-B, ^GSPC"></label>
     <label class="field"><span>Timeframe</span><select id="tfIn" name="tf"></select></label>
     <label class="field" id="histField" hidden title="How far back to load intraday candles"><span>History</span><select id="histIn" name="hist"></select></label>

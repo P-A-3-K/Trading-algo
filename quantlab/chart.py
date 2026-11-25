@@ -250,6 +250,11 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
         df = bars.rename(columns=str.capitalize)
         df["Adj Close"] = df["Close"]          # already on the backtest's price basis
         adjusted = bool(bars.attrs.get("adjusted"))
+    elif ticker.startswith("MT5:"):                  # MetaTrader 5 daily bars (prices as traded)
+        bars = dl.load_bars(ticker, "1d")
+        df = bars.rename(columns=str.capitalize)
+        df["Adj Close"] = df["Close"]
+        source, adjusted = "mt5", False
     else:
         df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
     bpd = bars_per_day(df.index)
@@ -258,7 +263,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
     if strategy is not None:
         from .backtest import fills_of, run_backtest, simulate
         from .metrics import full_stats
-        if not intraday:
+        if not intraday and not ticker.startswith("MT5:"):
             bars = dl.load_bars(ticker)
         out = strategy.run(bars)
         plots, fills = out.plots, fills_of(bars, out)
@@ -295,7 +300,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
                 periods[name] = {"stats": period_stats(part),
                                  "luck": luck_payload(strat.returns.iloc[part], bench.returns.iloc[part])}
         label = repr(strategy)
-        adjusted = adjusted if intraday else True  # daily strategies run on adjusted bars
+        adjusted = adjusted if (intraday or ticker.startswith("MT5:")) else True  # daily: adjusted bars
     return {"ticker": ticker, "adjusted": adjusted, "strategy": label,
             "costs": costs.describe() if (strategy is not None and costs) else "",
             "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,

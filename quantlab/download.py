@@ -53,6 +53,7 @@ def fetch(ticker: str, timeout: float = 30) -> pd.DataFrame:
 
 
 TICKER_RE = re.compile(r"^\^?[A-Z0-9][A-Z0-9.\-=]{0,14}$")
+MT5_RE = re.compile(r"^MT5:[A-Za-z0-9][A-Za-z0-9._\-#]{0,30}$")    # e.g. MT5:US100.cash (case kept)
 
 
 def clean_ticker(ticker: str) -> str:
@@ -62,7 +63,13 @@ def clean_ticker(ticker: str) -> str:
     from reaching files outside data/. Allowed: an optional leading ^ (indices),
     then letters, digits and . - = (e.g. BRK-B, ^GSPC), up to 16 characters.
     """
-    t = str(ticker).strip().upper()
+    t = str(ticker).strip()
+    if t.upper().startswith("MT5:"):                # MetaTrader 5 symbol: keep its exact case
+        t = "MT5:" + t[4:]
+        if not MT5_RE.match(t) or ".." in t:
+            raise ValueError(f"Not a valid MT5 symbol: {ticker!r}")
+        return t
+    t = t.upper()
     if not TICKER_RE.match(t):
         raise ValueError(f"Not a valid ticker: {ticker!r}")
     return t
@@ -74,7 +81,9 @@ def csv_path(ticker: str) -> Path:
 
 def cached_tickers() -> list:
     """Tickers already downloaded into data/, alphabetically."""
-    return sorted(p.stem for p in DATA_DIR.glob("*.csv") if TICKER_RE.match(p.stem))
+    yahoo = sorted(p.stem for p in DATA_DIR.glob("*.csv") if TICKER_RE.match(p.stem))
+    mt5 = sorted({"MT5:" + p.stem for tf in ("5m", "1d") for p in (DATA_DIR / "mt5" / tf).glob("*.csv")})
+    return yahoo + mt5
 
 
 def download(ticker: str, refresh: bool = False) -> Path:
@@ -126,6 +135,9 @@ def load_bars(ticker: str, timeframe: str = "1d", history: str = None) -> pd.Dat
     Intraday ("5m", "15m", "30m", "1h", "4h"): see load_intraday().
     history: intraday only, how far back: "60d", "6m", "1y", "2y", "5y" or "all".
     """
+    if str(ticker).upper().startswith("MT5:"):
+        from . import mt5
+        return mt5.load(clean_ticker(ticker), check_timeframe(timeframe), history)
     if timeframe != "1d":
         return load_intraday(ticker, timeframe, history)
     df = pd.read_csv(download(ticker), parse_dates=["Date"], index_col="Date")

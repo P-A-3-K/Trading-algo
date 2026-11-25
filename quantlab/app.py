@@ -379,12 +379,24 @@ def plan_payload(source, query: dict) -> dict:
     return prop.plans(source, prop_rules_of(query), **plan_options(query))
 
 
+def mt5_status() -> dict:
+    """Is the MetaTrader5 package installed, and what's been downloaded (no connection made)."""
+    from . import mt5
+    import importlib.util
+    try:
+        installed = importlib.util.find_spec("MetaTrader5") is not None
+    except (ValueError, ImportError):
+        installed = False
+    return {"installed": installed, "saved": mt5.saved()}
+
+
 def settings_payload(local: bool, message: str = "", error: bool = False, key_id: str = "") -> dict:
     from . import alpaca
     keys = alpaca.load_keys()
     return {"alpaca": {"enabled": bool(keys), "key": alpaca.masked(keys[0]) if keys else "",
                        "from": alpaca.keys_source(), "feed": alpaca.preferred_feed()},
             "saved": alpaca.saved(), "local": local, "message": message, "error": error,
+            "mt5": mt5_status(),
             "key_id": key_id}
 
 

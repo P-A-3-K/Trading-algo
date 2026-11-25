@@ -405,7 +405,7 @@ function drawLegs() {
     const s = BY_ID[L.strategy] || A.strategies[0];
     return `<div class="leg" style="--legc: var(${COLORS[i % COLORS.length]})">` +
       `<span class="num">${i + 1}</span>` +
-      `<label class="field"><span>Ticker</span><input class="tk" data-i="${i}" value="${esc(L.ticker)}" maxlength="16" autocomplete="off" spellcheck="false"></label>` +
+      `<label class="field"><span>Ticker</span><input class="tk" data-i="${i}" value="${esc(L.ticker)}" maxlength="40" autocomplete="off" spellcheck="false"></label>` +
       `<label class="field"><span>Timeframe</span><select class="tf" data-i="${i}">${A.timeframes.map(([v, l]) => `<option value="${v}"${v === L.tf ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>` +
       `<label class="field strat"><span>Strategy</span><select class="st" data-i="${i}">${strategyOptions(A.strategies.filter(x => x.id !== "none"))}</select></label>` +
       `<div class="settings">${settingInputs(i, s, L.settings || {})}</div>` +

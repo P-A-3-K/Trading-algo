@@ -28,6 +28,9 @@ class CostModel:
     slippage_range: float = 0.05      # x typical bar range (0.05 = 5% of it)
     impact: float = 0.1               # square-root impact coefficient (0 = off)
     account: float = 10_000.0         # account size in $ (for impact)
+    bar_spread: bool = True           # use each bar's own spread when the data has one (MT5)
+    swap_long_bps: float = None       # cost per night held, bp of the position (None: from the data)
+    swap_short_bps: float = None
 
     def describe(self) -> str:
         parts = [f"spread {self.spread_bps:g} bp" + (f" ({self.extended_spread_bps:g} bp outside 9:30-16:00)"
@@ -53,6 +56,9 @@ class CostModel:
         # spread: wider outside regular hours (daily bars count as regular)
         rth = regular_hours(idx) if intraday else np.ones(len(idx), dtype=bool)
         spread = np.where(rth, self.spread_bps, self.extended_spread_bps)
+        if self.bar_spread and "spread" in bars.columns:  # the broker's real spread, bar by bar
+            real = (bars["spread"].astype(float) / 2 / close * 10_000).to_numpy()   # half-spread, bp
+            spread = np.where(np.isfinite(real) & (real > 0), real, spread)
         linear = (self.commission_bps + spread) / 10_000
 
         # slippage: share of the typical bar range (median of the last 20 bars)
@@ -73,24 +79,54 @@ class CostModel:
             vol = daily_close.pct_change().rolling(20, min_periods=2).std().bfill().fillna(0.02)
             per_day = (self.impact * vol * np.sqrt(self.account / adv.replace(0, np.nan))).fillna(0)
             k = per_day.reindex(day).to_numpy()
-        return PreparedCosts(np.asarray(linear, dtype=float), np.asarray(k, dtype=float))
+        # swaps: cost per night a position is held (CFDs); a weekend counts 3 nights
+        sl = self.swap_long_bps if self.swap_long_bps is not None else bars.attrs.get("swap_long_bps")
+        ss = self.swap_short_bps if self.swap_short_bps is not None else bars.attrs.get("swap_short_bps")
+        nights = nights_between(idx) if (sl or ss) else np.zeros(len(idx))
+        return PreparedCosts(np.asarray(linear, dtype=float), np.asarray(k, dtype=float),
+                             nights, (sl or 0.0) / 10_000, (ss or 0.0) / 10_000)
+
+
+def nights_between(index) -> np.ndarray:
+    """Rollovers between each bar and the one before it (CFD swaps are charged at
+    17:00 New York; a weekend counts 3 nights). Daily bars: calendar days between them."""
+    n = len(index)
+    if n < 2 or not isinstance(index, pd.DatetimeIndex):
+        return np.zeros(n)
+    if index.tz is not None:                         # intraday: the trading day starts at 17:00 NY
+        day = (index.tz_convert("America/New_York").tz_localize(None) + pd.Timedelta(hours=7)).normalize()
+    else:
+        day = index.normalize()
+    d = np.diff(day.to_numpy()).astype("timedelta64[D]").astype(float)
+    return np.r_[0.0, np.maximum(d, 0.0)]
 
 
 @dataclass
 class PreparedCosts:
     linear: np.ndarray     # cost per unit traded, per bar (fraction)
     impact: np.ndarray     # impact factor per bar: cost = impact x size^1.5
+    nights: np.ndarray = None   # rollovers between bar i-1 and bar i
+    swap_long: float = 0.0      # cost per night per unit long (fraction)
+    swap_short: float = 0.0     # ... per unit short
 
     def __call__(self, i, size):
         """Cost (fraction of the account) of trading `size` (0-1+) on bar i."""
         size = np.abs(size)
         return size * self.linear[i] + self.impact[i] * size ** 1.5
 
+    def holding(self, held_before: np.ndarray) -> np.ndarray:
+        """Swap cost on each bar for the position carried into it from the bar before."""
+        if self.nights is None or not (self.swap_long or self.swap_short):
+            return np.zeros(len(held_before))
+        h = np.nan_to_num(np.asarray(held_before, dtype=float))
+        rate = np.where(h > 0, self.swap_long, np.where(h < 0, self.swap_short, 0.0))
+        return np.abs(h) * rate * self.nights
+
 
 def flat(cost_bps: float) -> CostModel:
     """The old simple model: a fixed cost per trade, nothing else."""
     return CostModel(commission_bps=0, spread_bps=cost_bps, extended_spread_bps=cost_bps,
-                     slippage_range=0, impact=0)
+                     slippage_range=0, impact=0, bar_spread=False, swap_long_bps=0.0, swap_short_bps=0.0)
 
 
 PRESETS = {

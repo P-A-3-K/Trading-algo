@@ -34,6 +34,9 @@ combined account. Weights can be equal, equal-risk, or anything (over 100% = lev
 whole 3-year journey: e.g. 1.5x during the challenge, then 1x once funded, or with a "cushion" that steps
 down after a drop. Shows the chance of being funded within 6/12/24 months, challenges bought, fees,
 payouts and the net result, with retries after failures. Presets include FTMO-style and The5ers-style rules.
+**MetaTrader 5 (prop firm prices):** on Windows, `.venv\Scripts\pip install MetaTrader5`, open MT5
+logged in (e.g. FTMO), then `.venv\Scripts\python -m quantlab.mt5 download US100.cash XAUUSD`. Use
+`MT5:US100.cash` as a ticker anywhere: real per-candle spreads and overnight swaps are included.
 **Multi-timeframe:** strategies can read a higher timeframe's candles (only finished ones, so no
 peeking). Try **MTF RSI** (buy short-term dips while the 4h RSI shows an up-trend) or FVG's
 **Trend filter timeframe**; on the Optimize page, tick several timeframes to test which works.
@@ -80,6 +83,7 @@ pytest -q
 | `quantlab/alpaca.py` | Alpaca market data: years of 5m candles, saved and updated incrementally; keys kept in `alpaca_keys.json` (git-ignored) |
 | `quantlab/prop.py` | Prop firm check: challenge rules (target, max/trailing loss, daily loss) played on block-bootstrapped futures at many position sizes; safe size |
 | `quantlab/portfolio.py` | Several strategies in one account: legs combined daily by weight over their common period; correlation, equal-risk weights; prop check on the whole |
+| `quantlab/mt5.py` | MetaTrader 5: download a broker's / prop firm's 5m and daily candles with spreads, swap rates; server time -> New York |
 | `quantlab/bootstrap.py` | Block bootstrap: 5,000 reshuffled histories, range of likely Sharpe, chance of beating buy & hold |
 | `quantlab/costs.py` | Cost model: commission, spread (wider outside regular hours), slippage scaled by volatility, square-root market impact |
 | `quantlab/app.py` | Local web server: chart page per ticker/strategy (set in the address), JSON API |

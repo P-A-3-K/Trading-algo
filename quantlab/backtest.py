@@ -46,6 +46,10 @@ def run_backtest(prices: pd.Series, positions: pd.Series,
         exec_bar = np.maximum(np.arange(len(turnover)) - 1, 0)
         paid = pd.Series(costs(exec_bar, turnover.to_numpy()), index=turnover.index)
 
+    if costs is not None and hasattr(costs, "holding"):   # overnight swaps (CFDs)
+        # held[i] is the position carried from bar i-1's close into bar i: the one that
+        # sits through any rollover between them
+        paid = paid + pd.Series(costs.holding(held.to_numpy()), index=paid.index)
     strat_returns = held * asset_returns - paid
     equity = (1 + strat_returns).cumprod()
     trades = int((turnover > 0).sum())
@@ -145,9 +149,14 @@ def simulate_trades(bars: pd.DataFrame, trades: list, cost_bps: float = 5.0,
             c_out = float(fee(i1, t.size))
             r[i1] += w * (t.exit_price / close[i1 - 1] - 1) - c_out
             paid[i1] += c_out
+    held = held_positions(idx, trades)
+    if costs is not None and hasattr(costs, "holding"):       # overnight swaps (CFDs)
+        swap = costs.holding(np.r_[0.0, held.to_numpy()[:-1]])
+        r -= swap
+        paid += swap
     returns = pd.Series(r, index=idx)
     fills = sum(1 if t.exit_date is None else 2 for t in trades)
-    return BacktestResult((1 + returns).cumprod(), returns, held_positions(idx, trades), fills,
+    return BacktestResult((1 + returns).cumprod(), returns, held, fills,
                           costs=pd.Series(paid, index=idx))
 
 
