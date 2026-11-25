@@ -190,3 +190,16 @@ def test_early_close_day_closes_before_the_early_close(tmp_path):
     assert t.strftime("%H:%M") == "12:58"                                   # 2 minutes before 13:00
     trader2, broker2, j2 = run_day(us_day([101.0, 102.0], day="2026-11-26"), tmp_path / "h")
     assert broker2.sent == [] and "holiday" in list(j2["event"])
+
+
+def test_leftover_trade_from_an_earlier_day_is_closed(tmp_path):
+    path = us_day([100.0] * 10, day="2024-03-06")
+    cfg = L.LiveConfig(legs=[L.LegConfig("US", "US100.cash", settings={"session": "US"})])
+    broker = FakeBroker(path)
+    broker.positions_.append({"side": 1, "volume": 10, "price": 99.0, "sl": 90.0, "magic": L.MAGIC_BASE, "ticket": 77})
+    broker.orders_.append({"side": -1, "volume": 10, "price": 95.0, "sl": 99.0, "magic": L.MAGIC_BASE, "ticket": 78})
+    trader = L.Trader(cfg, broker, folder=tmp_path, echo=False)
+    trader.check_account()
+    trader.step(path.index[0].to_pydatetime())
+    j = pd.read_csv(tmp_path / "journal.csv")
+    assert not broker.positions_ and not broker.orders_ and "left over" in " ".join(j["note"].astype(str))

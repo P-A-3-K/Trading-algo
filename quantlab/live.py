@@ -207,6 +207,14 @@ class LegRunner:
                                note=f"started after the opening range ({self.tz}); trading starts next session")
             return
         st = self.state.setdefault(key, {"phase": "wait"})
+        if st["phase"] == "wait" and not st.get("cleaned") and not self.dry:
+            # a trade left open from an earlier day (e.g. the PC was off at the close): close it now
+            for p in broker.positions(self.cfg.symbol, self.magic):
+                px = broker.close(p)
+                self.journal.write(now_utc, self.cfg.name, "closed", price=px, ticket=p["ticket"],
+                                   note="left over from an earlier day", equity=round(broker.equity(), 2))
+            self.cancel_all(now_utc, broker)
+            st["cleaned"] = True
         if st["phase"] == "done":
             return
         if minute >= close_at:                                                     # end of the session
