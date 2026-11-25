@@ -41,6 +41,9 @@ class FakeMT5(types.ModuleType):
     def symbol_info_tick(self, sym):
         return types.SimpleNamespace(time=int(time.time() + self.offset * 3600), bid=20000.0)
 
+    def copy_rates_from_pos(self, sym, tf, start, count):
+        return self.copy_rates_range(sym, tf, datetime(2024, 1, 1, tzinfo=timezone.utc), datetime(2024, 1, 5, tzinfo=timezone.utc))
+
     def symbols_get(self):
         return [types.SimpleNamespace(name="US100.cash", description="US Tech 100")]
 
@@ -154,3 +157,12 @@ def test_finds_branded_terminal_and_remembers_it(tmp_path, monkeypatch):
     f.initialize = lambda path=None: False
     with pytest.raises(M.MT5Error, match="--path"):
         M.connect()
+
+
+def test_specs_price_fallback_and_typical_spread(fake, monkeypatch):
+    monkeypatch.setattr(M.time, "sleep", lambda s: None)
+    fake.symbol_info_tick = lambda sym: types.SimpleNamespace(time=0, bid=0.0)      # no tick yet
+    s = M.specs("US100.cash", fake)
+    assert s["price"] == 20000.0                                  # from symbol_info.bid
+    assert s["swap_long_bps"] == pytest.approx(1.0)               # -200 points x 0.01 on 20,000
+    assert s["spread_all_bps"] == pytest.approx(1.5 / 20000 * 10000, rel=0.05)

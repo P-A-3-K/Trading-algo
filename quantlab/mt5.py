@@ -210,24 +210,57 @@ def swap_bps_per_night(info, price: float):
     return -f(lng) * 10_000, -f(sht) * 10_000
 
 
+def current_price(mt5, symbol: str, info=None) -> float:
+    """A usable price: the latest tick (waiting briefly: a just-selected symbol has none yet),
+    else the symbol's last bid/last price, else the last daily candle's close."""
+    for _ in range(15):
+        tick = mt5.symbol_info_tick(symbol)
+        price = float(getattr(tick, "bid", 0) or 0) if tick is not None else 0.0
+        if price > 0:
+            return price
+        time.sleep(0.2)
+    info = info or mt5.symbol_info(symbol)
+    for attr in ("bid", "last", "session_close"):
+        v = float(getattr(info, attr, 0) or 0)
+        if v > 0:
+            return v
+    rates = mt5.copy_rates_from_pos(symbol, getattr(mt5, "TIMEFRAME_D1"), 0, 1) if hasattr(mt5, "copy_rates_from_pos") else None
+    return float(rates[-1]["close"]) if rates is not None and len(rates) else 0.0
+
+
+def typical_spread_bps(mt5, symbol: str, point: float, offset_h: float = DEFAULT_NY_OFFSET_H):
+    """(median spread in regular US hours, median spread overall), in bp, from recent 5m candles."""
+    if not hasattr(mt5, "copy_rates_from_pos"):
+        return None, None
+    rates = mt5.copy_rates_from_pos(symbol, getattr(mt5, "TIMEFRAME_M5"), 0, 5000)
+    df = to_frame(rates, point, offset_h, daily=False)
+    if df.empty:
+        return None, None
+    bps = df["Spread"] / df["Close"] * 10_000
+    minutes = df.index.hour * 60 + df.index.minute
+    rth = bps[(minutes >= 9 * 60 + 30) & (minutes < 16 * 60)]
+    med = lambda x: float(x.median()) if len(x) else None
+    return med(rth), med(bps)
+
+
 def specs(symbol: str, mt5=None) -> dict:
     """Contract specification of a symbol, with swaps converted to bp per night."""
     mt5 = mt5 or connect()[0]
     symbol = resolve(mt5, symbol)
     info = mt5.symbol_info(symbol)
-    tick = mt5.symbol_info_tick(symbol)
-    price = float(getattr(tick, "bid", 0) or getattr(info, "bid", 0) or 0)
+    price = current_price(mt5, symbol, info)
     swap_l, swap_s = swap_bps_per_night(info, price)
-    spread_px = float(getattr(info, "spread", 0)) * float(info.point)
+    point = float(info.point)
+    rth_bps, all_bps = typical_spread_bps(mt5, symbol, point, ny_offset_hours(mt5, symbol))
     return {"symbol": symbol, "description": getattr(info, "description", ""),
-            "digits": int(getattr(info, "digits", 2)), "point": float(info.point),
+            "digits": int(getattr(info, "digits", 2)), "point": point,
             "contract_size": float(getattr(info, "trade_contract_size", 1.0)),
             "currency_profit": getattr(info, "currency_profit", ""),
             "volume_min": float(getattr(info, "volume_min", 0.01)), "volume_step": float(getattr(info, "volume_step", 0.01)),
             "swap_mode": int(getattr(info, "swap_mode", 0)),
             "swap_long_raw": float(getattr(info, "swap_long", 0.0)), "swap_short_raw": float(getattr(info, "swap_short", 0.0)),
             "swap_long_bps": swap_l, "swap_short_bps": swap_s,
-            "spread_now_bps": spread_px / price * 10_000 if price else None, "price": price,
+            "spread_rth_bps": rth_bps, "spread_all_bps": all_bps, "price": price,
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds")}
 
 
@@ -385,9 +418,12 @@ def main(argv=None):
         elif cmd == "specs":
             for sym in rest:
                 s = specs(sym, mt5)
-                print(f"  {sym}: {s['description']} · contract {s['contract_size']:g} · spread now "
-                      f"{s['spread_now_bps'] or 0:.2f} bp · swap per night: long {s['swap_long_bps']} bp, "
-                      f"short {s['swap_short_bps']} bp (mode {s['swap_mode']}, raw {s['swap_long_raw']}/{s['swap_short_raw']})")
+                f2 = lambda v: "?" if v is None else f"{v:.2f}"
+                yr = lambda v: "" if v is None else f" (~{v * 365 / 100:.1f}% a year)"
+                print(f"  {sym:12s} price {s['price']:g} · typical spread {f2(s['spread_rth_bps'])} bp in US hours, "
+                      f"{f2(s['spread_all_bps'])} bp overall · swap cost per night: long {f2(s['swap_long_bps'])} bp"
+                      f"{yr(s['swap_long_bps'])}, short {f2(s['swap_short_bps'])} bp{yr(s['swap_short_bps'])}"
+                      f"  [mode {s['swap_mode']}, raw {s['swap_long_raw']:g}/{s['swap_short_raw']:g}]")
         else:
             for sym in rest:
                 for tf in ("1d", "5m"):
