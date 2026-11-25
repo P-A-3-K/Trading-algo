@@ -129,6 +129,7 @@ def costs_of(query: dict):
                     raise ValueError(f"cost setting {field} must be a number, got {query[q]!r}")
                 if base[field] < 0:
                     raise ValueError(f"cost setting {field} can't be negative")
+        base["bar_spread"] = False        # your spreads replace the data's own (e.g. another broker's)
         return name, CostModel(**base)
     if name not in PRESETS:
         raise ValueError(f"Unknown cost preset {name!r}. Choose from: {', '.join(PRESETS)}, custom")
