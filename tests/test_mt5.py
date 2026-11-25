@@ -134,3 +134,23 @@ def test_no_package_message(monkeypatch):
     monkeypatch.setitem(sys.modules, "MetaTrader5", None)
     with pytest.raises(M.MT5Error, match="pip install MetaTrader5"):
         M.connect()
+
+
+def test_finds_branded_terminal_and_remembers_it(tmp_path, monkeypatch):
+    f = FakeMT5()
+    term = tmp_path / "FTMO MetaTrader 5" / "terminal64.exe"
+    term.parent.mkdir(); term.write_text("x", encoding="utf-8")
+    attempts = []
+    def init(path=None):
+        attempts.append(path)
+        return path == str(term)
+    f.initialize = init
+    monkeypatch.setitem(sys.modules, "MetaTrader5", f)
+    monkeypatch.setattr(dl, "DATA_DIR", tmp_path / "data")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    mt5, info = M.connect()
+    assert attempts[0] is None and attempts[-1] == str(term) and info["company"] == "FTMO"
+    assert M.terminal_path_file().read_text(encoding="utf-8") == str(term)
+    f.initialize = lambda path=None: False
+    with pytest.raises(M.MT5Error, match="--path"):
+        M.connect()

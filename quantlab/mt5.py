@@ -45,11 +45,61 @@ def _lib():
     return mt5
 
 
-def connect():
-    """Connect to the running MT5 terminal; returns (module, account info dict)."""
+def terminal_candidates() -> list:
+    """Where MT5 terminals usually live on Windows: default and broker-branded installs
+    (e.g. "C:\\Program Files\\FTMO MetaTrader 5\\terminal64.exe"), newest first."""
+    import os
+    found = []
+    saved = terminal_path_file()
+    if os.environ.get("MT5_PATH"):
+        found.append(Path(os.environ["MT5_PATH"]))
+    if saved.exists():
+        found.append(Path(saved.read_text(encoding="utf-8").strip()))
+    roots = [os.environ.get(k) for k in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432")]
+    roots += [str(Path.home() / "AppData" / "Roaming"), str(Path.home() / "AppData" / "Local" / "Programs")]
+    for root in filter(None, dict.fromkeys(roots)):
+        try:
+            hits = sorted(Path(root).glob("*/terminal64.exe"), key=lambda p: p.stat().st_mtime, reverse=True)
+        except OSError:
+            continue
+        found += hits
+    return list(dict.fromkeys(p for p in found if str(p)))
+
+
+def terminal_path_file() -> Path:
+    return data_dir() / "terminal_path.txt"
+
+
+def connect(path: str = None):
+    """Connect to the running MT5 terminal; returns (module, account info dict).
+
+    Finds the terminal on its own (default and broker-branded installs); a path given
+    here (or with --path, or in the MT5_PATH environment variable) is remembered."""
     mt5 = _lib()
-    if not mt5.initialize():
-        raise MT5Error(f"Couldn't connect to MetaTrader 5 ({mt5.last_error()}). Open MT5, log in, and try again.")
+    tried = []
+    if path:
+        ok = mt5.initialize(path=str(path))
+        tried.append(str(path))
+    else:
+        ok = mt5.initialize()
+        if not ok:
+            for cand in terminal_candidates():
+                if cand.exists() and mt5.initialize(path=str(cand)):
+                    ok, path = True, str(cand)
+                    break
+                tried.append(str(cand))
+    if not ok:
+        where = ("Tried: " + "; ".join(tried[:6]) + ". ") if tried else ""
+        raise MT5Error(f"Couldn't connect to MetaTrader 5 ({mt5.last_error()}). Is MT5 open and logged in? {where}"
+                       "If it's installed somewhere else, give its terminal64.exe, e.g.\n"
+                       '  .venv\\Scripts\\python -m quantlab.mt5 list --path "C:\\Program Files\\FTMO MetaTrader 5\\terminal64.exe"\n'
+                       "(right-click the MT5 shortcut -> Open file location to find it).")
+    if path:                                                  # remember the terminal that worked
+        try:
+            terminal_path_file().parent.mkdir(parents=True, exist_ok=True)
+            terminal_path_file().write_text(str(path), encoding="utf-8")
+        except OSError:
+            pass
     acc = mt5.account_info()
     info = {"server": getattr(acc, "server", ""), "company": getattr(acc, "company", ""),
             "currency": getattr(acc, "currency", ""), "login": getattr(acc, "login", 0)}
@@ -316,8 +366,16 @@ def main(argv=None):
         print(__doc__)
         return
     cmd, rest = args[0], args[1:]
+    path = None
+    if "--path" in rest:
+        i = rest.index("--path")
+        if i + 1 >= len(rest):
+            print("  --path needs the full path of terminal64.exe")
+            return
+        path = rest[i + 1]
+        rest = rest[:i] + rest[i + 2:]
     try:
-        mt5, info = connect()
+        mt5, info = connect(path)
         print(f"Connected: {info['company']} · {info['server']} · account currency {info['currency']}")
         if cmd == "list":
             needle = (rest[0] if rest else "").lower()
