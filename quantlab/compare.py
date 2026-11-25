@@ -69,7 +69,10 @@ def compare(ticker: str, timeframe: str, specs: list, history: str = "all", star
     ss = costs.swap_short_bps if costs.swap_short_bps is not None else bars.attrs.get("swap_short_bps")
     if sl or ss:
         note += f"; overnight swaps: long {sl or 0:.2f} bp, short {ss or 0:.2f} bp per night"
+    days = len(pd.Index(bars.index.date).unique()) if isinstance(bars.index, pd.DatetimeIndex) else len(bars)
+    span_days = (bars.index[-1] - bars.index[0]).days if len(bars) > 1 else 0
     out.attrs.update(start=bars.index[0], end=bars.index[-1], bars=len(bars), costs=note,
+                     days=days, expected_days=int(span_days * 252 / 365),
                      source=bars.attrs.get("source", "yahoo" if timeframe != "1d" else "daily"))
     return out
 
@@ -84,7 +87,10 @@ def show(df: pd.DataFrame) -> str:
     for c, f in fmt.items():
         table[c] = [f(v) for v in df[c]]
     a = df.attrs
-    head = f"{a.get('start')} -> {a.get('end')}  ({a.get('bars'):,} bars, {a.get('source')})" + \
+    gap = ""
+    if a.get("expected_days") and a["days"] < 0.8 * a["expected_days"]:
+        gap = f"  WARNING: data on only {a['days']:,} of ~{a['expected_days']:,} trading days (gaps): results unreliable"
+    head = f"{a.get('start')} -> {a.get('end')}  ({a.get('bars'):,} bars on {a.get('days', 0):,} trading days, {a.get('source')})" + gap + \
         (f"\ncosts: {a['costs']}" if a.get("costs") else "")
     return head + "\n" + table.to_string()
 
@@ -99,6 +105,8 @@ def main(argv=None):
     ap.add_argument("--to", dest="end", default=None, help="end date (not included), e.g. 2024-06-01")
     ap.add_argument("--cost", default="realistic", help="realistic, flat5, none or expensive")
     ap.add_argument("--spread", type=float, help="half-spread in bp (regular hours); replaces the data's own spreads")
+    ap.add_argument("--ext-spread", dest="ext_spread", type=float,
+                    help="half-spread in bp outside 9:30-16:00 New York (default: same as --spread)")
     ap.add_argument("--slip", type=float, help="slippage as a share of the bar's range, e.g. 0.02")
     ap.add_argument("--commission", type=float, help="commission in bp per trade")
     a = ap.parse_args(argv)
@@ -111,7 +119,10 @@ def main(argv=None):
     tweaks = {k: v for k, v in (("spread_bps", a.spread), ("slippage_range", a.slip),
                                  ("commission_bps", a.commission)) if v is not None}
     if a.spread is not None:              # an explicit spread replaces the data's own (e.g. another broker's)
-        tweaks["bar_spread"] = False
+        tweaks["bar_spread"] = False      # ... at every hour: "after-hours" in New York is London's or Tokyo's
+        tweaks["extended_spread_bps"] = a.spread if a.ext_spread is None else a.ext_spread   # main session
+    elif a.ext_spread is not None:
+        tweaks["extended_spread_bps"] = a.ext_spread
     if tweaks:
         model = replace(model, **tweaks)
     print(show(compare(a.ticker, a.timeframe, a.strategies, a.hist, a.start, model, a.end)))
