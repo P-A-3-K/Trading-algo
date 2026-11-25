@@ -166,3 +166,11 @@ def test_specs_price_fallback_and_typical_spread(fake, monkeypatch):
     assert s["price"] == 20000.0                                  # from symbol_info.bid
     assert s["swap_long_bps"] == pytest.approx(1.0)               # -200 points x 0.01 on 20,000
     assert s["spread_all_bps"] == pytest.approx(1.5 / 20000 * 10000, rel=0.05)
+
+
+def test_full_redownload(fake):
+    M.download("US100.cash", "5m")
+    p = M.cache_path("US100.cash", "5m")
+    p.write_text("Datetime,Open,High,Low,Close,Volume,Spread\n2024-01-02T00:00:00Z,1,1,1,1,0,0\n", encoding="utf-8")
+    M.main(["download", "US100.cash", "--full"])
+    assert len(M.read(p, daily=False)) > 100                          # fetched again from the start

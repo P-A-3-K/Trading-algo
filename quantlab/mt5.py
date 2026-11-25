@@ -7,6 +7,9 @@ Then, with MT5 running:
     python -m quantlab.mt5 list cash            # symbols whose name contains "cash"
     python -m quantlab.mt5 specs US100.cash     # contract, spread, swap rates
     python -m quantlab.mt5 download US100.cash US500.cash XAUUSD
+    python -m quantlab.mt5 download DE40 --full        # everything again, not just newer candles
+If a 5-minute history stops at about 100,000 candles: in MT5, Tools > Options > Charts >
+"Max. bars in chart" = Unlimited, restart MT5, then download again with --full.
 In the app, use the ticker  MT5:US100.cash  (any timeframe; 1 day uses MT5's daily bars).
 
 What's saved (data/mt5/): 5-minute bars (all intraday timeframes are built from them) and
@@ -399,6 +402,8 @@ def main(argv=None):
         print(__doc__)
         return
     cmd, rest = args[0], args[1:]
+    full = "--full" in rest                       # download everything again (e.g. after raising MT5's bar limit)
+    rest = [a for a in rest if a != "--full"]
     path = None
     if "--path" in rest:
         i = rest.index("--path")
@@ -427,6 +432,10 @@ def main(argv=None):
         else:
             for sym in rest:
                 for tf in ("1d", "5m"):
+                    if full:
+                        old = cache_path(saved_name(sym, tf), tf)
+                        if old.exists():
+                            old.unlink()
                     p = download(sym, tf, refresh=True)
                     df = read(p, tf == "1d")
                     print(f"  {sym} {tf}: {len(df):,} bars, {df.index[0]} -> {df.index[-1]}")
