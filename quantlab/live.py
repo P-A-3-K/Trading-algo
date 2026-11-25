@@ -36,6 +36,7 @@ from pathlib import Path
 import pandas as pd
 
 MAGIC_BASE = 2611000
+LATE_START_MINUTES = 5          # started later than this after the range: skip the day
 
 
 # ---- Configuration -------------------------------------------------------------------------
@@ -170,9 +171,15 @@ class LegRunner:
             return
         minute = local.hour * 60 + local.minute
         key = self.day_key(now_utc)
-        st = self.state.setdefault(key, {"phase": "wait"})
         range_end = self.open_min + int(self.params["range_minutes"])
         close_at = self.close_min - self.live.close_minutes_before
+        if key not in self.state and range_end + LATE_START_MINUTES < minute < close_at:
+            # started after today's range: the breakout may be over, so sit this day out (like the backtest would)
+            self.state[key] = {"phase": "done"}
+            self.journal.write(now_utc, self.cfg.name, "too late today",
+                               note=f"started after the opening range ({self.tz}); trading starts next session")
+            return
+        st = self.state.setdefault(key, {"phase": "wait"})
         if st["phase"] == "done":
             return
         if minute >= close_at:                                                     # end of the session

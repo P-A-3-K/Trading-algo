@@ -158,3 +158,15 @@ def test_init_writes_a_config(tmp_path, monkeypatch):
     L.main(["init"])
     cfg = L.LiveConfig.load(tmp_path / "live" / "live.json")
     assert [l.symbol for l in cfg.legs] == ["US100.cash", "GER40.cash"]
+
+
+def test_started_after_the_range_sits_the_day_out(tmp_path):
+    path = us_day([101.0, 102.0, 103.0] + [103.0] * 60)
+    cfg = L.LiveConfig(legs=[L.LegConfig("US", "US100.cash", settings={"session": "US", "rr": 0})])
+    broker = FakeBroker(path)
+    trader = L.Trader(cfg, broker, folder=tmp_path, echo=False)
+    trader.check_account()
+    for t in pd.date_range(path.index[0] + pd.Timedelta(minutes=60), path.index[-1], freq="1min"):   # starts 10:30
+        broker.set_time(t); trader.step(t.to_pydatetime())
+    j = pd.read_csv(tmp_path / "journal.csv")
+    assert broker.sent == [] and "too late today" in list(j["event"])
