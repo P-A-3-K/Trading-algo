@@ -62,7 +62,14 @@ def compare(ticker: str, timeframe: str, specs: list, history: str = "all", star
                  "sharpe": st["sharpe"], "worst DD": st["max_drawdown"], "in market": 1.0,
                  "round trips": None, "win rate": None, "costs $": None})
     out = pd.DataFrame(rows).set_index("strategy")
-    out.attrs.update(start=bars.index[0], end=bars.index[-1], bars=len(bars), costs=costs.describe(),
+    note = costs.describe()
+    if costs.bar_spread and "spread" in bars.columns:
+        note = "real spread of every candle (from the data) instead of the fixed spread; " + note
+    sl = costs.swap_long_bps if costs.swap_long_bps is not None else bars.attrs.get("swap_long_bps")
+    ss = costs.swap_short_bps if costs.swap_short_bps is not None else bars.attrs.get("swap_short_bps")
+    if sl or ss:
+        note += f"; overnight swaps: long {sl or 0:.2f} bp, short {ss or 0:.2f} bp per night"
+    out.attrs.update(start=bars.index[0], end=bars.index[-1], bars=len(bars), costs=note,
                      source=bars.attrs.get("source", "yahoo" if timeframe != "1d" else "daily"))
     return out
 
