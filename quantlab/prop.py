@@ -52,6 +52,11 @@ PRESETS = {
                  Rules(target=0.10, target2=0.0, max_loss=0.06, trailing=True, daily_loss=0.03)),
     "strict": ("Strict two-step (8% / 5%, 8% max loss, 4% daily)",
                Rules(target=0.08, target2=0.05, max_loss=0.08, daily_loss=0.04)),
+    # Public rules of two firms we looked at (Nov 2026). Firms change rules: check theirs.
+    "ftmo_2step": ("FTMO-style 2-Step (10% / 5%, 10% max, 5% daily, min 4 days)",
+                   Rules(target=0.10, target2=0.05, max_loss=0.10, daily_loss=0.05, min_days=4)),
+    "the5ers_hs": ("The5ers High Stakes-style (8% / 5%, 10% max, 5% daily, min 3 days)",
+                   Rules(target=0.08, target2=0.05, max_loss=0.10, daily_loss=0.05, min_days=3)),
 }
 SIZES = [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
 
@@ -207,3 +212,136 @@ def safe_size(returns, rules: Rules, margin: float = 0.5, top: float = 10.0):
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if ok(mid) else (lo, mid)
     return math.floor(lo * 100) / 100            # round down: never above the safe level
+
+
+# ---- Challenge plan: the whole journey, retries and payouts included ---------------------
+
+@dataclass
+class Plan:
+    """How to size the account at each stage (sizes are multiples of the strategy's position)."""
+    label: str
+    challenge_size: float = 1.0
+    funded_size: float = 1.0
+    cushion_size: float = None      # step down to this size in the challenge ...
+    cushion_dd: float = 0.04        # ... while equity is this far below the phase's start
+
+
+DEFAULT_PLANS = [
+    Plan("Safe size all the way", None, None),
+    Plan("1x all the way", 1.0, 1.0),
+    Plan("1.5x challenge, then 1x", 1.5, 1.0),
+    Plan("2x challenge, then 1x", 2.0, 1.0),
+    Plan("2x with cushion (1x after -4%), then 1x", 2.0, 1.0, cushion_size=1.0, cushion_dd=0.04),
+    Plan("3x challenge, then 1x", 3.0, 1.0),
+    Plan("2x challenge, then safe size", 2.0, None),
+]
+
+
+def simulate_plan(ret: np.ndarray, low: np.ndarray, rules: Rules, plan: Plan, days: int,
+                  fee: float, account: float, split: float, refund: bool, payout_days: int = 21):
+    """Play the journey on (sims x days) arrays of daily return / daily low at size 1.
+
+    Returns per-simulation arrays: first funded day (or -1), attempts bought, fees paid,
+    payouts received, and whether the funded account was lost.
+    """
+    sims = ret.shape[0]
+    phase = np.ones(sims, dtype=int)                # 1, 2 = challenge phases, 3 = funded
+    eq = np.ones(sims)                              # equity relative to the stage's start
+    peak = np.ones(sims)
+    n_days = np.zeros(sims, dtype=int)              # trading days in the current stage
+    attempts = np.ones(sims)
+    fees = np.full(sims, float(fee))
+    paid = np.zeros(sims)
+    refunded = np.zeros(sims, dtype=bool)
+    funded_at = np.full(sims, -1)
+    lost = np.zeros(sims, dtype=bool)
+    target = np.where(phase == 1, rules.target, rules.target2)
+    for t in range(days):
+        in_ch = phase < 3
+        size = np.where(in_ch, plan.challenge_size, plan.funded_size)
+        if plan.cushion_size is not None:
+            size = np.where(in_ch & (eq <= 1 - plan.cushion_dd), plan.cushion_size, size)
+        r = np.maximum(size * ret[:, t], -0.999999)
+        lo = np.minimum(np.maximum(size * low[:, t], -0.999999), 0.0)
+        start = eq
+        lowest = start * (1 + lo)
+        eq = start * (1 + r)
+        n_days += 1
+        if rules.trailing:
+            floor = np.minimum(peak - rules.max_loss, 1.0)
+        else:
+            floor = 1.0 - rules.max_loss
+        broke = (lowest <= floor) | (start - lowest >= rules.daily_loss)
+        peak = np.maximum(peak, eq)
+        target = np.where(phase == 1, rules.target, rules.target2)
+        timeout = in_ch & (rules.max_days > 0) & (n_days >= rules.max_days)
+        passed = in_ch & ~broke & (eq >= 1 + target) & (n_days >= max(rules.min_days, 1))
+        # Funded: monthly payout of the profit (account resets to its start)
+        fund = phase == 3
+        pay_now = fund & ~broke & (n_days % payout_days == 0) & (eq > 1)
+        if pay_now.any():
+            paid += np.where(pay_now, (eq - 1) * account * split, 0.0)
+            if refund:
+                give = pay_now & ~refunded
+                paid += np.where(give, fee, 0.0)
+                refunded |= give
+            eq = np.where(pay_now, 1.0, eq)
+            peak = np.where(pay_now, 1.0, peak)
+        # Failures: a challenge is bought again; a lost funded account too
+        fail = (in_ch & (broke | timeout)) | (fund & broke)
+        lost |= fund & broke
+        attempts += fail
+        fees += np.where(fail, fee, 0.0)
+        # Phase changes
+        to_phase2 = passed & (phase == 1) & (rules.target2 > 0)
+        to_funded = passed & ((phase == 2) | ((phase == 1) & (rules.target2 <= 0)))
+        funded_at = np.where(to_funded & (funded_at < 0), t, funded_at)
+        phase = np.where(fail, 1, np.where(to_phase2, 2, np.where(to_funded, 3, phase)))
+        reset = fail | to_phase2 | to_funded
+        eq = np.where(reset, 1.0, eq)
+        peak = np.where(reset, 1.0, peak)
+        n_days = np.where(reset, 0, n_days)
+    return funded_at, attempts, fees, paid, lost
+
+
+def plans(returns, rules: Rules = None, plan_list=None, months: int = 36, sims: int = 2000,
+          fee: float = 540.0, account: float = 100_000.0, split: float = 0.8, refund: bool = True,
+          block: int = 10, seed: int = 1) -> dict:
+    """Compare sizing plans over the whole journey (challenge -> funded), retries included.
+
+    Every simulated future is `months` long; when a challenge (or a funded account) fails,
+    a new challenge is bought straight away. Payouts: monthly, profit x split; the fee is
+    refunded with the first payout when `refund` is True.
+    """
+    rules = rules or Rules()
+    plan_list = plan_list or DEFAULT_PLANS
+    parts = parts_of(returns)
+    r1, l1 = parts(1.0)
+    n_hist = len(r1)
+    if n_hist < 40:
+        raise ValueError(f"Only {n_hist} trading days of results: too few to simulate a challenge.")
+    days = int(months * 21)
+    rng = np.random.default_rng(seed)
+    pick = bootstrap_days(n_hist, sims, days, block, rng)
+    R, L = r1[pick], l1[pick]
+    safe = safe_size(returns, rules)
+    rows = []
+    for p in plan_list:
+        p = Plan(p.label, p.challenge_size if p.challenge_size is not None else (safe or 0.1),
+                 p.funded_size if p.funded_size is not None else (safe or 0.1), p.cushion_size, p.cushion_dd)
+        funded_at, attempts, fees, paid, lost = simulate_plan(R, L, rules, p, days, fee, account, split, refund)
+        got = funded_at >= 0
+        within = lambda m: float((got & (funded_at < m * 21)).mean())
+        rows.append({
+            "label": p.label, "challenge_size": round(p.challenge_size, 2), "funded_size": round(p.funded_size, 2),
+            "cushion": p.cushion_size is not None,
+            "funded_6": within(6), "funded_12": within(12), "funded_24": within(24), "funded_ever": float(got.mean()),
+            "median_months": float(np.median(funded_at[got]) / 21) if got.any() else None,
+            "attempts": float(attempts.mean()), "fees": float(fees.mean()),
+            "payouts": float(paid.mean()), "net": float((paid - fees).mean()),
+            "net_p10": float(np.percentile(paid - fees, 10)), "net_p90": float(np.percentile(paid - fees, 90)),
+            "lost_funded": float(lost.mean()),
+        })
+    return {"rules": asdict(rules), "describe": rules.describe(), "rows": rows, "safe": safe,
+            "months": months, "sims": sims, "fee": fee, "account": account, "split": split,
+            "refund": refund, "days": n_hist, "block": block}

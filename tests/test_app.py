@@ -220,3 +220,12 @@ def test_portfolio_routes(server):
     status, body = get(server + "/api/portfolio?" + bad)
     assert status == 400 and "Leg 1" in json.loads(body)["error"]
     assert get(server + "/api/portfolio?legs=notjson")[0] == 400
+
+
+def test_plan_routes(server):
+    status, body = get(server + "/api/prop/plan?ticker=TEST&strategy=SmaCrossover&fast=10&slow=30&prop=ftmo_2step"
+                       "&plan_c=1.5&plan_f=1&plan_fee=540")
+    assert status == 200, body[:300]
+    d = json.loads(body)
+    assert d["rules"]["min_days"] == 4 and d["rows"][-1]["label"].startswith("Your plan")
+    assert get(server + "/api/prop/plan?ticker=TEST&strategy=SmaCrossover&plan_split=0")[0] == 400

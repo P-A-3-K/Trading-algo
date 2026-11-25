@@ -30,6 +30,10 @@ funded account survives, and the largest "safe" size. On the Optimize page, rank
 on the chart page): each leg is a ticker + timeframe + strategy + weight. You get the combined growth,
 each leg vs the whole, how the legs move together (correlation), and the Prop firm check on the
 combined account. Weights can be equal, equal-risk, or anything (over 100% = leverage).
+**Challenge plan:** under the Prop firm check (chart and Portfolio pages). Compares sizing plans over a
+whole 3-year journey: e.g. 1.5x during the challenge, then 1x once funded, or with a "cushion" that steps
+down after a drop. Shows the chance of being funded within 6/12/24 months, challenges bought, fees,
+payouts and the net result, with retries after failures. Presets include FTMO-style and The5ers-style rules.
 **Multi-timeframe:** strategies can read a higher timeframe's candles (only finished ones, so no
 peeking). Try **MTF RSI** (buy short-term dips while the 4h RSI shows an up-trend) or FVG's
 **Trend filter timeframe**; on the Optimize page, tick several timeframes to test which works.

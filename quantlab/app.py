@@ -335,6 +335,50 @@ def portfolio_prop_payload(query: dict) -> dict:
     return out
 
 
+def plan_options(query: dict) -> dict:
+    """Fee, account size, profit split, and an optional custom plan, from the address."""
+    from . import prop
+    num = lambda k, d: float(query[k]) if query.get(k, "") != "" else d
+    opts = {"fee": num("plan_fee", 540.0), "account": num("plan_account", 100_000.0),
+            "split": num("plan_split", 80.0) / 100, "refund": query.get("plan_refund", "1") == "1"}
+    if not (0 <= opts["fee"] <= 100_000 and 1_000 <= opts["account"] <= 10_000_000 and 0 < opts["split"] <= 1):
+        raise ValueError("Check the plan settings: fee, account size (1,000+) and profit split (1-100%).")
+    plan_list = list(prop.DEFAULT_PLANS)
+    if query.get("plan_c"):
+        c, f = num("plan_c", 1.0), num("plan_f", 1.0)
+        cush = num("plan_cush", 0.0) or None
+        if not (0 < c <= 10 and 0 < f <= 10):
+            raise ValueError("Plan sizes must be between 0 and 10x.")
+        label = f"Your plan: {c:g}x challenge" + (f" ({cush:g}x after -{num('plan_cush_dd', 4.0):g}%)" if cush else "") + f", then {f:g}x"
+        plan_list.append(prop.Plan(label, c, f, cush, num("plan_cush_dd", 4.0) / 100))
+    opts["plan_list"] = plan_list
+    return opts
+
+
+def chart_returns(query: dict):
+    """The chart strategy's returns (whole history, or the training / test period)."""
+    from .backtest import simulate
+    from .costs import CostModel
+    ticker = dl.clean_ticker(query.get("ticker") or DEFAULT_TICKER)
+    strategy = strategy_from_query(query)
+    if strategy is None:
+        raise ValueError("Pick a strategy first: the check runs on its results.")
+    tf = timeframe_of(query)
+    bars = dl.load_bars(ticker, tf, history_of(query, tf))
+    costs = costs_of(query)[1] or CostModel()
+    strat = simulate(bars, strategy.run(bars), costs=costs.prepare(bars)).returns
+    period = query.get("period") or "all"
+    if query.get("test_from") and period in ("train", "test"):
+        cut = chart.split_index(bars.index, query["test_from"])
+        strat = strat.iloc[:cut] if period == "train" else strat.iloc[cut:]
+    return strat
+
+
+def plan_payload(source, query: dict) -> dict:
+    from . import prop
+    return prop.plans(source, prop_rules_of(query), **plan_options(query))
+
+
 def settings_payload(local: bool, message: str = "", error: bool = False, key_id: str = "") -> dict:
     from . import alpaca
     keys = alpaca.load_keys()
@@ -582,6 +626,7 @@ class Handler(BaseHTTPRequestHandler):
                   "/api/scan/cancel": self.api_scan_cancel,
                   "/settings": self.settings_page, "/api/prop": self.api_prop,
                   "/api/estimate": self.api_estimate,
+                  "/api/prop/plan": self.api_prop_plan, "/api/portfolio/plan": self.api_portfolio_plan,
                   "/portfolio": self.portfolio_page, "/api/portfolio": self.api_portfolio,
                   "/api/portfolio/prop": self.api_portfolio_prop,
                   "/favicon.ico": self.no_content}
@@ -705,6 +750,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def api_estimate(self, query):
         self.send_json(estimate_payload(query))
+
+    def api_prop_plan(self, query):
+        self.send_json(plan_payload(chart_returns(query), query))
+
+    def api_portfolio_plan(self, query):
+        from . import portfolio as pf
+        res = pf.run(legs_of(query), history=query.get("hist") or None, costs=costs_of(query)[1],
+                     start=query.get("from") or None)
+        self.send_json(plan_payload(pf.prop_source(res), query))
 
     def api_prop(self, query):
         self.send_json(prop_payload(query))

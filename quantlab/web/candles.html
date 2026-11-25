@@ -68,6 +68,23 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .prop tr.safe td { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
 .prop td.bad { color: var(--down); } .prop td.good { color: var(--up); }
 .prop .note { color: var(--muted); font-size: 12px; margin: 0; max-width: 90ch; }
+.plans { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.plans-h { margin: 0; font: 600 15px/1.3 var(--sans); }
+.plans-h small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
+.plan-verdict { margin: 10px 0 0; max-width: 90ch; }
+.plans .rules { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-top: 10px; }
+.plans .rules input { width: 7em; }
+.plans table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.plans th, .plans td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.plans th { font: 500 11px/1.25 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--muted); white-space: normal; vertical-align: bottom; }
+.plans td { font: 400 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+.plans td.l, .plans th.l { text-align: left; font-family: var(--sans); white-space: normal; }
+.plans tr.safe td { background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.plans td.bad { color: var(--down); } .plans td.good { color: var(--up); }
+.plans .note { color: var(--muted); font-size: 12px; margin: 8px 0 0; max-width: 90ch; }
+.plans input { font: 500 14px/1.2 var(--mono); color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+.plans button.run { font: 500 13px/1 var(--mono); border: 1px solid var(--accent); border-radius: 6px; cursor: pointer; color: var(--panel); background: var(--accent); padding: 9px 16px; }
+.plans button.run:disabled { opacity: .7; cursor: progress; }
 .rhead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
 h2 { margin: 0; font: 600 16px/1.2 var(--sans); }
 h2 small { font: 400 12px var(--sans); color: var(--muted); margin-left: 6px; }
@@ -250,6 +267,7 @@ footer a { color: inherit; }
       <p class="prop-verdict" id="propVerdict"></p>
       <div class="tablewrap" id="propTableWrap" hidden><table id="propTable"></table></div>
       <p class="note" id="propNote"></p>
+      <div class="plans" id="plansBox"></div>
     </div>
     <div class="luck" id="luckWrap" hidden>
       <div class="rhead"><h2>Could it be luck? <small id="luckNote"></small></h2></div>
@@ -830,7 +848,8 @@ if (DATA.equity) {
   const verdict = document.getElementById("propVerdict"), tbl = document.getElementById("propTable");
   const PRESETS = { two_step: "Two-step: +10% then +5%, 10% max loss, 5% daily",
                     one_step: "One-step: +10%, 6% trailing loss, 3% daily",
-                    strict: "Strict two-step: +8% then +5%, 8% max loss, 4% daily", custom: "Custom…" };
+                    strict: "Strict two-step: +8% then +5%, 8% max loss, 4% daily", ftmo_2step: "FTMO-style 2-Step: +10% then +5%, 10% max, 5% daily, min 4 days",
+                    the5ers_hs: "The5ers High Stakes-style: +8% then +5%, 10% max, 5% daily, min 3 days", custom: "Custom…" };
   const FIELDS = [["p_target", "Target %", 10], ["p_target2", "Phase 2 target % (0 = none)", 5], ["p_maxloss", "Max loss %", 10],
                   ["p_daily", "Daily loss %", 5], ["p_days", "Days per phase (0 = no limit)", 0]];
   rulesEl.innerHTML = `<label class="field"><span>Challenge rules</span><select id="propPreset">` +
@@ -848,6 +867,14 @@ if (DATA.equity) {
   const pct1 = v => v === null || v === undefined ? "–" : (v * 100).toFixed(1) + "%";
   verdict.innerHTML = `Pick the rules and press <b>Run check</b>. It takes a few seconds.`;
   propStale = () => { if (!document.getElementById("propTableWrap").hidden) verdict.innerHTML = `The period changed: press <b>Run check</b> again for the ${CUR_PERIOD === "test" ? "test" : CUR_PERIOD === "train" ? "training" : "whole"} period.`; };
+  const propQuery = () => {
+    const q = new URLSearchParams(location.search);
+    q.set("ticker", DATA.ticker); q.set("tf", DATA.timeframe || "1d"); q.set("period", CUR_PERIOD);
+    q.set("prop", presetIn.value);
+    if (presetIn.value === "custom") { FIELDS.forEach(([k]) => q.set(k, document.getElementById(k).value)); q.set("p_trailing", document.getElementById("p_trailing").value); }
+    return q;
+  };
+  setupPlans(document.getElementById("plansBox"), "/api/prop/plan", propQuery);
   runB.addEventListener("click", async () => {
     const q = new URLSearchParams(location.search);
     q.set("ticker", DATA.ticker); q.set("tf", DATA.timeframe || "1d"); q.set("period", CUR_PERIOD);
@@ -889,6 +916,63 @@ if (DATA.equity) {
       `Losses count at each day's lowest point; the target at the day's close. Red: past drawdown or worst day already beyond the limit. ` +
       `The futures repeat the past's character: if it had a strong trend, they assume more of it.`;
   }
+}
+
+
+// ---- Challenge plan: the whole journey (challenge -> funded), retries included -----------
+function setupPlans(box, endpoint, baseQuery) {
+  box.innerHTML = `<h3 class="plans-h">Challenge plan <small>bigger size to pass faster, smaller once funded? Compare whole journeys over 3 years</small></h3>
+    <div class="rules">
+      <label class="field"><span>Challenge fee (€)</span><input type="number" id="planFee" value="540" min="0" step="any"></label>
+      <label class="field"><span>Account size</span><input type="number" id="planAccount" value="100000" min="1000" step="1000"></label>
+      <label class="field"><span>Profit split %</span><input type="number" id="planSplit" value="80" min="1" max="100" step="any"></label>
+      <label class="field"><span>Your plan: challenge ×</span><input type="number" id="planC" placeholder="e.g. 1.5" min="0.05" max="10" step="any"></label>
+      <label class="field"><span>then funded ×</span><input type="number" id="planF" placeholder="e.g. 1" min="0.05" max="10" step="any"></label>
+      <label class="field"><span>cushion: step down to ×</span><input type="number" id="planCush" placeholder="optional" min="0.05" max="10" step="any"></label>
+      <label class="field"><span>after a drop of %</span><input type="number" id="planCushDd" value="4" min="0.5" max="9" step="any"></label>
+      <button type="button" class="run" id="planRun">Compare challenge plans</button>
+    </div>
+    <p class="plan-verdict" id="planVerdict"></p>
+    <div class="tablewrap" id="planWrap" hidden><table id="planTable"></table></div>
+    <p class="note" id="planNote"></p>`;
+  const btn = box.querySelector("#planRun"), verdict = box.querySelector("#planVerdict");
+  const eur = v => (v < 0 ? "−€" : "€") + Math.round(Math.abs(v)).toLocaleString();
+  const p0 = v => v === null || v === undefined ? "–" : Math.round(v * 100) + "%";
+  btn.addEventListener("click", async () => {
+    const q = baseQuery();
+    q.set("plan_fee", box.querySelector("#planFee").value); q.set("plan_account", box.querySelector("#planAccount").value);
+    q.set("plan_split", box.querySelector("#planSplit").value);
+    const c = box.querySelector("#planC").value, f = box.querySelector("#planF").value;
+    if (c) { q.set("plan_c", c); q.set("plan_f", f || c); }
+    const cu = box.querySelector("#planCush").value;
+    if (c && cu) { q.set("plan_cush", cu); q.set("plan_cush_dd", box.querySelector("#planCushDd").value); }
+    btn.disabled = true; btn.textContent = "Simulating…";
+    try {
+      const r = await fetch(endpoint + "?" + q), P = await r.json();
+      if (!r.ok) throw new Error(P.error || r.statusText);
+      const rows = P.rows;
+      const best = [...rows].sort((a, b) => b.net - a.net)[0];
+      const fastest = [...rows].filter(x => x.median_months !== null).sort((a, b) => a.median_months - b.median_months)[0];
+      verdict.innerHTML = `Highest average result after ${P.months} months: <b>${esc(best.label)}</b> (${eur(best.net)} net, funded within 12 months in ${p0(best.funded_12)} of futures). ` +
+        (fastest ? `Fastest to funded: <b>${esc(fastest.label)}</b> (median ${fastest.median_months.toFixed(1)} months, ${fastest.attempts.toFixed(1)} challenges bought on average). ` : "") +
+        `Look at "funded account lost" too: the funded size decides how long the account lasts.` +
+        (best.challenge_size >= Math.max(...rows.map(x => x.challenge_size)) ? ` <b>Careful:</b> the most aggressive plan only wins if the edge is as good as in the past. If it's weaker, bigger sizes pile up failed challenges much faster, so a middle size is the safer bet.` : "");
+      box.querySelector("#planTable").innerHTML = `<thead><tr><th class="l">Plan</th><th>Size: challenge → funded</th><th>Funded within 6 mo</th><th>12 mo</th><th>24 mo</th>` +
+        `<th>Median time to funded</th><th>Challenges bought (avg)</th><th>Fees (avg)</th><th>Payouts (avg)</th><th>Net (avg)</th><th>Net: bad 10% … good 10%</th><th>Funded account lost</th></tr></thead><tbody>` +
+        rows.map(x => `<tr class="${x === best ? "safe" : ""}"><td class="l">${esc(x.label)}</td><td>${x.challenge_size}× → ${x.funded_size}×</td>` +
+          `<td>${p0(x.funded_6)}</td><td>${p0(x.funded_12)}</td><td class="${x.funded_24 >= 0.8 ? "good" : ""}">${p0(x.funded_24)}</td>` +
+          `<td>${x.median_months === null ? "–" : x.median_months.toFixed(1) + " mo"}</td><td>${x.attempts.toFixed(1)}</td><td>${eur(x.fees)}</td>` +
+          `<td>${eur(x.payouts)}</td><td class="${x.net >= 0 ? "good" : "bad"}">${eur(x.net)}</td><td>${eur(x.net_p10)} … ${eur(x.net_p90)}</td>` +
+          `<td class="${x.lost_funded >= 0.25 ? "bad" : ""}">${p0(x.lost_funded)}</td></tr>`).join("") + `</tbody>`;
+      box.querySelector("#planWrap").hidden = false;
+      box.querySelector("#planNote").textContent =
+        `${P.sims.toLocaleString()} simulated ${P.months}-month futures from ${P.block}-day blocks of the results (${P.days.toLocaleString()} trading days). ` +
+        `Rules: ${P.describe}. A failed challenge (or a lost funded account) is replaced by a new one straight away, paying the fee again. ` +
+        `Funded: profits paid out monthly at ${Math.round(P.split * 100)}%` + (P.refund ? ", the fee refunded with the first payout" : "") +
+        `. Size 1× = the strategy (or portfolio weights) as it is; safe size = ${P.safe ?? "–"}×. Averages hide luck: see the bad/good 10% column.`;
+    } catch (err) { verdict.textContent = "Plan comparison failed: " + err.message; }
+    btn.disabled = false; btn.textContent = "Compare challenge plans";
+  });
 }
 
 // ---- Could it be luck? (block bootstrap) -----------------------------------------

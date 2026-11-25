@@ -72,3 +72,30 @@ def test_prop_return_metric_in_sweeps():
     bars = pd.DataFrame({"open": c, "high": c, "low": c, "close": c, "volume": 1.0})
     t = optimize.sweep(bars, SmaCrossover, {"fast": (10, 30, 10), "slow": (60, 60, 1)}).table
     assert {"is_prop", "oos_prop"} <= set(t.columns)
+
+
+def test_challenge_plans_journey():
+    steady = prop.DailyResults(pd.Series(0.004, index=pd.bdate_range("2020-01-01", periods=300)),
+                               pd.Series(0.0, index=pd.bdate_range("2020-01-01", periods=300)))
+    out = prop.plans(steady, prop.Rules(), [prop.Plan("1x", 1.0, 1.0), prop.Plan("2x", 2.0, 1.0)],
+                     months=12, sims=50, fee=500, account=100_000, split=0.8)
+    one, two = out["rows"]
+    # +0.4% a day: phase 1 (+10%) in 24 days, phase 2 (+5%) in 13 -> funded on day 37
+    assert one["funded_6"] == 1.0 and one["attempts"] == 1.0 and one["lost_funded"] == 0.0
+    assert one["median_months"] == pytest.approx(36 / 21)
+    assert two["median_months"] < one["median_months"]            # bigger size: faster
+    assert one["payouts"] > 500 and one["net"] == pytest.approx(one["payouts"] - one["fees"])
+    crash = prop.DailyResults(pd.Series(-0.03, index=pd.bdate_range("2020-01-01", periods=60)),
+                              pd.Series(-0.03, index=pd.bdate_range("2020-01-01", periods=60)))
+    bad = prop.plans(crash, prop.Rules(), [prop.Plan("2x", 2.0, 1.0)], months=3, sims=20, fee=500)["rows"][0]
+    assert bad["funded_ever"] == 0.0 and bad["attempts"] > 10 and bad["net"] < -5000   # -6% a day: daily limit every day
+
+
+def test_cushion_steps_down():
+    rng = np.random.default_rng(0)
+    idx = pd.bdate_range("2020-01-01", periods=500)
+    r = pd.Series(rng.normal(0.0005, 0.01, 500), index=idx)
+    src = prop.DailyResults(r, r.clip(upper=0))
+    rows = prop.plans(src, prop.Rules(), [prop.Plan("3x", 3.0, 1.0), prop.Plan("3x cushion", 3.0, 1.0, 1.0, 0.03)],
+                      months=24, sims=400)["rows"]
+    assert rows[1]["attempts"] < rows[0]["attempts"]                # the cushion saves challenges
