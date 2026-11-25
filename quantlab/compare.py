@@ -98,7 +98,7 @@ def main(argv=None):
     ap.add_argument("--from", dest="start", default=None, help="start date, e.g. 2020-01-01")
     ap.add_argument("--to", dest="end", default=None, help="end date (not included), e.g. 2024-06-01")
     ap.add_argument("--cost", default="realistic", help="realistic, flat5, none or expensive")
-    ap.add_argument("--spread", type=float, help="half-spread in bp (regular hours)")
+    ap.add_argument("--spread", type=float, help="half-spread in bp (regular hours); replaces the data's own spreads")
     ap.add_argument("--slip", type=float, help="slippage as a share of the bar's range, e.g. 0.02")
     ap.add_argument("--commission", type=float, help="commission in bp per trade")
     a = ap.parse_args(argv)
@@ -110,6 +110,8 @@ def main(argv=None):
     model = PRESETS[a.cost]
     tweaks = {k: v for k, v in (("spread_bps", a.spread), ("slippage_range", a.slip),
                                  ("commission_bps", a.commission)) if v is not None}
+    if a.spread is not None:              # an explicit spread replaces the data's own (e.g. another broker's)
+        tweaks["bar_spread"] = False
     if tweaks:
         model = replace(model, **tweaks)
     print(show(compare(a.ticker, a.timeframe, a.strategies, a.hist, a.start, model, a.end)))

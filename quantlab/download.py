@@ -64,6 +64,11 @@ def clean_ticker(ticker: str) -> str:
     then letters, digits and . - = (e.g. BRK-B, ^GSPC), up to 16 characters.
     """
     t = str(ticker).strip()
+    if t.upper().startswith("CSV:"):                # imported candles (quantlab.importer)
+        t = "CSV:" + t[4:]
+        if not MT5_RE.match("MT5:" + t[4:]) or ".." in t:
+            raise ValueError(f"Not a valid name for imported candles: {ticker!r}")
+        return t
     if t.upper().startswith("MT5:"):                # MetaTrader 5 symbol: keep its exact case
         t = "MT5:" + t[4:]
         if not MT5_RE.match(t) or ".." in t:
@@ -83,7 +88,8 @@ def cached_tickers() -> list:
     """Tickers already downloaded into data/, alphabetically."""
     yahoo = sorted(p.stem for p in DATA_DIR.glob("*.csv") if TICKER_RE.match(p.stem))
     mt5 = sorted({"MT5:" + p.stem for tf in ("5m", "1d") for p in (DATA_DIR / "mt5" / tf).glob("*.csv")})
-    return yahoo + mt5
+    imported = sorted("CSV:" + p.stem for p in (DATA_DIR / "csv" / "5m").glob("*.csv"))
+    return yahoo + mt5 + imported
 
 
 def download(ticker: str, refresh: bool = False) -> Path:
@@ -138,6 +144,9 @@ def load_bars(ticker: str, timeframe: str = "1d", history: str = None) -> pd.Dat
     if str(ticker).upper().startswith("MT5:"):
         from . import mt5
         return mt5.load(clean_ticker(ticker), check_timeframe(timeframe), history)
+    if str(ticker).upper().startswith("CSV:"):
+        from . import importer
+        return importer.load(clean_ticker(ticker), check_timeframe(timeframe), history)
     if timeframe != "1d":
         return load_intraday(ticker, timeframe, history)
     df = pd.read_csv(download(ticker), parse_dates=["Date"], index_col="Date")
