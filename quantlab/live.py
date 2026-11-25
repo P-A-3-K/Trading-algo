@@ -37,6 +37,7 @@ import pandas as pd
 
 MAGIC_BASE = 2611000
 LATE_START_MINUTES = 5          # started later than this after the range: skip the day
+EXCHANGE_CALENDARS = {"US": "XNYS", "Europe": "XETR", "London": "XLON", "Tokyo": "XJPX"}
 
 
 # ---- Configuration -------------------------------------------------------------------------
@@ -158,6 +159,26 @@ class LegRunner:
         self.tz, self.open_min, self.close_min = session_of(self.params)
         self.magic = MAGIC_BASE + idx
         self.state = state                                                         # persisted per day
+        self._days = {}
+
+    def trading_day(self, local):
+        """(open today?, close minute today) from the exchange calendar: holidays are skipped and
+        early-close days (e.g. the day after Thanksgiving) close early."""
+        d = local.date()
+        if d not in self._days:
+            code = EXCHANGE_CALENDARS.get(self.params.get("session", "US"))
+            try:
+                import pandas_market_calendars as pmc
+                sched = pmc.get_calendar(code).schedule(str(d), str(d))
+            except Exception:                                    # no calendar: assume a normal weekday
+                self._days[d] = (local.weekday() < 5, self.close_min)
+                return self._days[d]
+            if sched.empty:
+                self._days[d] = (False, self.close_min)
+            else:
+                close = sched["market_close"].iloc[0].tz_convert(self.tz)
+                self._days[d] = (True, min(self.close_min, close.hour * 60 + close.minute))
+        return self._days[d]
 
     def local_now(self, now_utc: datetime):
         return pd.Timestamp(now_utc).tz_convert(self.tz)
@@ -172,7 +193,13 @@ class LegRunner:
         minute = local.hour * 60 + local.minute
         key = self.day_key(now_utc)
         range_end = self.open_min + int(self.params["range_minutes"])
-        close_at = self.close_min - self.live.close_minutes_before
+        is_open, close_min = self.trading_day(local)
+        if not is_open:
+            if key not in self.state:
+                self.state[key] = {"phase": "done"}
+                self.journal.write(now_utc, self.cfg.name, "holiday", note=f"the {self.tz} exchange is closed today")
+            return
+        close_at = close_min - self.live.close_minutes_before
         if key not in self.state and range_end + LATE_START_MINUTES < minute < close_at:
             # started after today's range: the breakout may be over, so sit this day out (like the backtest would)
             self.state[key] = {"phase": "done"}

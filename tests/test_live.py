@@ -170,3 +170,23 @@ def test_started_after_the_range_sits_the_day_out(tmp_path):
         broker.set_time(t); trader.step(t.to_pydatetime())
     j = pd.read_csv(tmp_path / "journal.csv")
     assert broker.sent == [] and "too late today" in list(j["event"])
+
+
+def test_holidays_and_early_closes():
+    cfg = L.LiveConfig(legs=[L.LegConfig("US", "US100.cash", settings={"session": "US"})])
+    leg = L.LegRunner(0, cfg.legs[0], cfg, None, {})
+    ny = lambda s: pd.Timestamp(s, tz="America/New_York")
+    assert leg.trading_day(ny("2026-11-26 10:00")) == (False, 960)          # Thanksgiving
+    assert leg.trading_day(ny("2026-11-27 10:00")) == (True, 13 * 60)       # closes at 13:00
+    assert leg.trading_day(ny("2026-11-25 10:00")) == (True, 960)
+
+
+def test_early_close_day_closes_before_the_early_close(tmp_path):
+    path = us_day([101.0, 102.0] + [102.0] * 400, day="2026-11-27")
+    trader, broker, j = run_day(path, tmp_path)
+    closed = j[j["event"] == "closed"]
+    assert len(closed) == 1
+    t = pd.Timestamp(closed["time_utc"].iloc[0], tz="UTC").tz_convert("America/New_York")
+    assert t.strftime("%H:%M") == "12:58"                                   # 2 minutes before 13:00
+    trader2, broker2, j2 = run_day(us_day([101.0, 102.0], day="2026-11-26"), tmp_path / "h")
+    assert broker2.sent == [] and "holiday" in list(j2["event"])
