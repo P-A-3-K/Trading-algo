@@ -174,3 +174,17 @@ def test_full_redownload(fake):
     p.write_text("Datetime,Open,High,Low,Close,Volume,Spread\n2024-01-02T00:00:00Z,1,1,1,1,0,0\n", encoding="utf-8")
     M.main(["download", "US100.cash", "--full"])
     assert len(M.read(p, daily=False)) > 100                          # fetched again from the start
+
+
+def test_saved_candles_used_when_mt5_lacks_the_symbol(fake, monkeypatch):
+    M.download("US100.cash", "5m")
+    dl._READ_CACHE.clear()
+
+    def other_broker(symbol, tf, *a, **k):          # e.g. logged into FTMO, which calls DE40 'GER40.cash'
+        raise M.MT5Error(f"MT5 doesn't know {symbol!r}")
+    monkeypatch.setattr(M, "download", other_broker)
+    with pytest.warns(UserWarning, match="saved"):
+        bars = dl.load_bars("MT5:US100.cash", "5m")
+    assert len(bars) > 0
+    with pytest.raises(M.MT5Error):
+        dl.load_bars("MT5:NOPE", "5m")              # nothing saved: the error still shows

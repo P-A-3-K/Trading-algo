@@ -354,14 +354,28 @@ def download(symbol: str, tf: str = "5m", refresh: bool = False, max_age: float 
     return path
 
 
+def updated(symbol: str, tf: str) -> Path:
+    """Update the saved candles from MT5; if that fails (MT5 closed, or logged into a broker that
+    names the market differently), use what was saved before."""
+    try:
+        return download(symbol, tf)
+    except Exception as e:
+        path = cache_path(symbol, tf)
+        if not path.exists():
+            raise
+        import warnings
+        warnings.warn(f"Using the saved {symbol} {tf} candles (not updated: {e})", stacklevel=2)
+        return path
+
+
 def load(ticker: str, timeframe: str, history: str = None) -> pd.DataFrame:
     """Bars for an MT5 ticker (e.g. 'MT5:US100.cash'), like download.load_bars returns."""
     from .download import HISTORY, RESAMPLE, check_history, clean_spikes, read_intraday_cached
     symbol = saved_name(symbol_of(ticker), "1d" if timeframe == "1d" else "5m")
     if timeframe == "1d":
-        df = read(download(symbol, "1d"), daily=True)
+        df = read(updated(symbol, "1d"), daily=True)
     else:
-        path = download(symbol, "5m")
+        path = updated(symbol, "5m")
         raw = read_intraday_cached(path)
         days = HISTORY[check_history(history)]
         if days:
