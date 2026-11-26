@@ -221,7 +221,8 @@ def show(markets, port, groups) -> str:
                 f"A = {a0.year}-{B_START.year - 1}, B = {B_START.year}-today", t.to_string(), ""]
         chk = port.attrs.get("cost_check")
         if chk is not None:
-            order = [k for k in ("no costs", "no swaps", "full") if f"A {k}" in chk.columns]
+            known = ["no costs", "low costs", "no swaps", "full"]
+            order = [k for k in known if f"A {k}" in chk.columns]
             out += ["What the costs take (portfolio Sharpe, " + " -> ".join(order) + "):",
                     chk[[f"{p} {k}" for p in ("A", "B") for k in order]].map(num).to_string(), ""]
     if not groups.empty:
