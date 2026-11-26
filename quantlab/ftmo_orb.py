@@ -8,7 +8,8 @@ For every FTMO market (MT5 open, logged into FTMO) next to the ETF that stands i
     in basis points (bp) of the position: the long-run edge, before costs;
   * cost per trade  = what a round trip really costs on FTMO: the spread of every candle
     from FTMO's own data (2026), plus slippage of 0%, 2% or 5% of a 5-minute candle's range;
-  * FTMO 2026       = the same ORB on FTMO's own candles, after real costs (one year: noisy).
+  * FTMO            = the same ORB on all of FTMO's own 5m candles, after real costs (indices:
+                      2026 only, noisy; some FX and metals go back many years).
 A market is worth trading when its edge per trade is clearly bigger than its cost per trade.
 """
 import sys
@@ -102,7 +103,7 @@ def show(t: pd.DataFrame) -> str:
         out["edge / cost (2%)"] = [("" if (e != e or c != c or c <= 0) else f"{e / c:.1f}x")
                                    for e, c in zip(t["ETF edge bp"], t["cost bp 2%"])]
     return ("Per ORB trade, in bp of the position. ETF = long-run edge (2017-today, before costs); "
-            "FTMO = 2026 on FTMO's own candles; cost = real spread + slippage 0/2/5% of a 5m range.\n"
+            "FTMO = all of FTMO's own 5m history (2026 for indices; FX and metals go back years); cost = real spread + slippage 0/2/5% of a 5m range.\n"
             + out.to_string())
 
 

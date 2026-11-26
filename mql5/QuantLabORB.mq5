@@ -519,7 +519,9 @@ int OnInit()
    int opens[] = {570, 540, 480, 540};
    int closes[] = {960, 1050, 990, 900};
    g_open = opens[g_zone]; g_close = closes[g_zone];
-   g_magic = MagicNumber > 0 ? MagicNumber : 770010 + g_zone;
+   long h = 0;                                       // automatic: unique per symbol and session
+   for(int i = 0; i < StringLen(_Symbol); i++) h = (h * 31 + StringGetCharacter(_Symbol, i)) % 1000;
+   g_magic = MagicNumber > 0 ? MagicNumber : 7700000 + g_zone * 1000 + h;
    g_tag = "[QL " + _Symbol + " " + EnumToString(Session) + "] ";
    if(RangeMinutes < 1 || g_open + RangeMinutes >= g_close) { Log("bad RangeMinutes"); return INIT_PARAMETERS_INCORRECT; }
 
