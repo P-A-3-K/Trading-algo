@@ -44,8 +44,8 @@ GROUPS = {
 }
 
 
-def group_of(symbol: str) -> str:
-    for g, names in GROUPS.items():
+def group_of(symbol: str, groups: dict = None) -> str:
+    for g, names in (groups or GROUPS).items():
         if symbol.lower() in (n.lower() for n in names):
             return g
     return "Other"
@@ -83,19 +83,27 @@ def cost_models() -> dict:
             "no costs": flat(0)}
 
 
-def market_returns(bars: pd.DataFrame, costs=None) -> dict:
-    """Daily returns (after the given costs; default: all) of every strategy on one market."""
+def market_variants(bars: pd.DataFrame, costs: dict, strategy_set: dict = None) -> dict:
+    """{cost name: {strategy: daily returns}}: each strategy runs once, then is costed each way.
+    Intraday bars are compounded into daily returns (New York trading dates)."""
     from .backtest import simulate
+    outs = {name: strategies.get(cls)(**kw).run(bars) for name, (cls, kw) in (strategy_set or STRATEGIES).items()}
+    result = {}
+    for key, model in costs.items():
+        prepared = model.prepare(bars)
+        result[key] = {}
+        for name, out in outs.items():
+            r = simulate(bars, out, costs=prepared).returns.copy()
+            idx = pd.DatetimeIndex(r.index)
+            r.index = idx.tz_localize(None) if idx.tz is not None else idx
+            result[key][name] = weekdays_only(r)
+    return result
+
+
+def market_returns(bars: pd.DataFrame, costs=None, strategy_set: dict = None) -> dict:
+    """Daily returns (after the given costs; default: all) of every strategy on one market."""
     from .costs import CostModel
-    prepared = (costs or CostModel()).prepare(bars)
-    out = {}
-    for name, (cls, kw) in STRATEGIES.items():
-        strat = strategies.get(cls)(**kw)
-        bt = simulate(bars, strat.run(bars), costs=prepared)
-        r = bt.returns.copy()
-        r.index = pd.DatetimeIndex(r.index).tz_localize(None) if getattr(r.index, "tz", None) else pd.DatetimeIndex(r.index)
-        out[name] = weekdays_only(r)
-    return out
+    return market_variants(bars, {"x": costs or CostModel()}, strategy_set)["x"]
 
 
 def cost_facts(bars: pd.DataFrame) -> dict:
@@ -119,9 +127,15 @@ def data_problems(bars: pd.DataFrame) -> str:
     return ", ".join(notes)
 
 
-def run(symbols=None, loader=load_mt5, progress=print):
-    """-> (per-market table, portfolio table, group table)."""
-    symbols = symbols or [s for names in GROUPS.values() for s in names]
+def run(symbols=None, loader=load_mt5, progress=print, strategy_set=None, costs=None, groups=None,
+        a_start=None, unit="days"):
+    """-> (per-market table, portfolio table, group table).
+    strategy_set / costs / groups / a_start: defaults are the daily FTMO setup above."""
+    strategy_set, groups = strategy_set or STRATEGIES, groups or GROUPS
+    costs = costs or cost_models()
+    a_start = a_start or A_START
+    group_of_ = lambda s: group_of(s, groups)
+    symbols = symbols or [s for names in groups.values() for s in names]
     rets, rows = {}, []
     for sym in symbols:
         try:
@@ -131,20 +145,20 @@ def run(symbols=None, loader=load_mt5, progress=print):
             continue
         idx = pd.DatetimeIndex(bars.index)
         idx = idx.tz_localize(None) if idx.tz is not None else idx
-        bars = bars[idx >= A_START - pd.Timedelta(days=400)]          # a year of warm-up before A
+        bars = bars[idx >= a_start - pd.Timedelta(days=400)]          # a year of warm-up before A
         if len(bars) < MIN_BARS:
-            progress(f"  skip {sym}: only {len(bars)} daily candles")
+            progress(f"  skip {sym}: only {len(bars)} candles")
             continue
-        problems = data_problems(bars)
-        progress(f"  {sym:12s} {len(bars):5d} days" + (f"   WARNING: {problems}" if problems else ""))
-        variants = {k: market_returns(bars, m) for k, m in cost_models().items()}
+        problems = data_problems(bars) if unit == "days" else ""
+        progress(f"  {sym:12s} {len(bars):7,d} {unit}" + (f"   WARNING: {problems}" if problems else ""))
+        variants = market_variants(bars, costs, strategy_set)
         rets[sym] = variants
         facts = cost_facts(bars)
         for name, r in variants["full"].items():
-            a, b = stats(r[(r.index >= A_START) & (r.index < B_START)]), stats(r[r.index >= B_START])
+            a, b = stats(r[(r.index >= a_start) & (r.index < B_START)]), stats(r[r.index >= B_START])
             g = variants["no costs"][name]
-            ga, gb = stats(g[(g.index >= A_START) & (g.index < B_START)]), stats(g[g.index >= B_START])
-            rows.append({"market": sym, "group": group_of(sym), "strategy": name,
+            ga, gb = stats(g[(g.index >= a_start) & (g.index < B_START)]), stats(g[g.index >= B_START])
+            rows.append({"market": sym, "group": group_of_(sym), "strategy": name,
                          "sharpe A": a["sharpe"], "sharpe B": b["sharpe"],
                          "return/yr A": a["cagr"], "return/yr B": b["cagr"],
                          "no-cost sharpe A": ga["sharpe"], "no-cost sharpe B": gb["sharpe"],
@@ -153,28 +167,29 @@ def run(symbols=None, loader=load_mt5, progress=print):
     if markets.empty:
         return markets, pd.DataFrame(), pd.DataFrame()
     port_rows, group_rows, check_rows = [], [], []
-    for name in STRATEGIES:
+    for name in strategy_set:
         legs = {s: rets[s]["full"][name] for s in rets}
-        port_rows.append({"strategy": name, **portfolio(legs)})
+        port_rows.append({"strategy": name, **portfolio(legs, a_start)})
         check = {"strategy": name}
-        for k in cost_models():
-            p = portfolio({s: rets[s][k][name] for s in rets})
+        for k in costs:
+            p = portfolio({s: rets[s][k][name] for s in rets}, a_start)
             check[f"A {k}"], check[f"B {k}"] = p["sharpe A"], p["sharpe B"]
         check_rows.append(check)
-        for g in sorted({group_of(s) for s in legs}):
-            sub = {s: r for s, r in legs.items() if group_of(s) == g}
-            p = portfolio(sub)
+        for g in sorted({group_of_(s) for s in legs}):
+            sub = {s: r for s, r in legs.items() if group_of_(s) == g}
+            p = portfolio(sub, a_start)
             group_rows.append({"strategy": name, "group": g, "markets": len(sub),
                                "sharpe A": p["sharpe A"], "sharpe B": p["sharpe B"]})
     port = pd.DataFrame(port_rows).set_index("strategy")
     port.attrs["cost_check"] = pd.DataFrame(check_rows).set_index("strategy")
+    port.attrs["a_start"] = a_start
     return markets, port, pd.DataFrame(group_rows)
 
 
-def portfolio(legs: dict) -> dict:
+def portfolio(legs: dict, a_start=None) -> dict:
     """Equal-risk mix (weights from period A), scaled to TARGET_VOL in A; stats for A and B."""
     df = pd.DataFrame(legs).sort_index()
-    df = df[df.index >= A_START].fillna(0.0)
+    df = df[df.index >= (a_start or A_START)].fillna(0.0)
     a_part = df[df.index < B_START]
     vol = a_part.std().replace(0, np.nan)
     if a_part.empty or vol.isna().all():
@@ -201,12 +216,14 @@ def show(markets, port, groups) -> str:
             t[c] = [num(v) for v in port[c]]
         for c in ("return/yr A", "return/yr B", "worst DD A", "worst DD B"):
             t[c] = [pct(v) for v in port[c]]
+        a0 = port.attrs.get("a_start", A_START)
         out += [f"PORTFOLIO of all markets (equal risk, {TARGET_VOL:.0%} volatility in A). "
-                f"A = {A_START.year}-{B_START.year - 1}, B = {B_START.year}-today", t.to_string(), ""]
+                f"A = {a0.year}-{B_START.year - 1}, B = {B_START.year}-today", t.to_string(), ""]
         chk = port.attrs.get("cost_check")
         if chk is not None:
-            out += ["What the costs take (portfolio Sharpe: no costs -> spread+slippage only -> also swaps):",
-                    chk[[f"{p} {k}" for p in ("A", "B") for k in ("no costs", "no swaps", "full")]].map(num).to_string(), ""]
+            order = [k for k in ("no costs", "no swaps", "full") if f"A {k}" in chk.columns]
+            out += ["What the costs take (portfolio Sharpe, " + " -> ".join(order) + "):",
+                    chk[[f"{p} {k}" for p in ("A", "B") for k in order]].map(num).to_string(), ""]
     if not groups.empty:
         g = groups.pivot(index="group", columns="strategy", values=["sharpe A", "sharpe B"])
         g = g.swaplevel(axis=1).sort_index(axis=1, level=0)

@@ -26,7 +26,7 @@ class IntradayMomentum(Strategy):
     description = ("If the market rose from yesterday's close to 10:00, buy for the last half hour of the "
                    "day (sell short if it fell). One short trade a day, flat at the close.")
     params = {
-        "signal_minutes": Param(30, 15, 120, "Signal: first minutes after the open", step=15,
+        "signal_minutes": Param(30, 15, 360, "Signal: first minutes after the open", step=15,
                                 help="The signal is the move up to 9:30 + this many minutes (30 = 10:00)."),
         "signal_from": Param("prev close", choices=("prev close", "open"), label="Signal measured from",
                              help="prev close: includes the overnight gap (as in the research). open: from 9:30 only."),
