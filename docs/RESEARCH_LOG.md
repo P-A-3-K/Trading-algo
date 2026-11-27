@@ -17,8 +17,8 @@ portfolio of GER40.cash + US100.cash + XAUUSD**, whose edge per trade is only 2-
 cost per trade. The unknown that decides it is **real slippage** of stop orders.
 
 **Next step (agreed direction, not started):**
-1. Build a fill report: read the EA's trade history from MT5, compute real slippage and cost
-   per trade per market.
+1. ~~Build a fill report~~ done: `python -m quantlab.fills` (asked vs got price for every robot
+   fill, slippage in bp, cost per round trip vs the backtest's assumption).
 2. Run `QuantLabORB` on an FTMO demo on GER40.cash, US100.cash, XAUUSD, all `Session = US`,
    hosted on MetaQuotes VPS (~$15/month; the user can't keep their PC on).
 3. After ~2 months (~120 trades): if real costs are at or below the "2% slippage" level, rerun
@@ -142,6 +142,7 @@ sizing and the 15:58 flatten all verified in the journal.
 - Update: `git pull`. App: `start.bat`.
 - MT5 data: `.venv\Scripts\python -m quantlab.mt5 download US100.cash` (MT5 open, logged in).
 - A/B test: `.venv\Scripts\python -m quantlab.compare MT5:US100.cash 5m "OpeningRangeBreakout rr=0" --from 2026-01-01`
+- Fill report (real slippage of the robot's trades): `.venv\Scripts\python -m quantlab.fills [--days 30]`
 - Edge finders: `python -m quantlab.edges`, `python -m quantlab.intraday_edges [--only ORB]`,
   `python -m quantlab.ftmo_orb`.
 - EA: `.venv\Scripts\python -m quantlab.mql5 install` (copies + compiles into MT5).
