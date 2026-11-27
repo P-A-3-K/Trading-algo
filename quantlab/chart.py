@@ -82,6 +82,18 @@ def plots_payload(plots: list) -> list:
              "points": line_points(p.values)} for p in plots]
 
 
+def marks_payload(marks: list) -> list:
+    """Highlighted points (quantlab.strategy.Mark) in the format the page draws as markers."""
+    return [{"time": tkey(m.time), "price": round(float(m.price), 6), "kind": m.kind, "level": m.level,
+             "text": m.text} for m in marks or []]
+
+
+def lines_payload(lines: list) -> list:
+    """Horizontal levels (quantlab.strategy.LevelLine) for the page."""
+    return [{"t0": tkey(l.start), "t1": tkey(l.end), "price": round(float(l.price), 6), "kind": l.kind,
+             "level": l.level} for l in lines or []]
+
+
 def trades_payload(fills: pd.DataFrame) -> list:
     """Fills (quantlab.backtest.trades) in the format the page draws as arrows."""
     if fills is None:
@@ -259,6 +271,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
         df = pd.read_csv(dl.download(ticker), parse_dates=["Date"], index_col="Date")
     bpd = bars_per_day(df.index)
     plots, fills, equity, stats, luck, label = [], None, None, None, None, ""
+    marks, lines = [], []
     periods, split = None, None
     if strategy is not None:
         from .backtest import fills_of, run_backtest, simulate
@@ -267,6 +280,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
             bars = dl.load_bars(ticker)
         out = strategy.run(bars)
         plots, fills = out.plots, fills_of(bars, out)
+        marks, lines = out.marks, out.level_lines
         from .costs import CostModel
         costs = costs or CostModel()
         prepared = costs.prepare(bars)
@@ -306,6 +320,7 @@ def build_payload(ticker: str, strategy=None, adjusted: bool = True,
             "timeframe": timeframe, "intraday": intraday, "bars_per_day": bpd,
             "is_index": ticker.startswith("^"), "source": source, "history": history if intraday else None,
             "bars": candles(df, adjusted), "plots": plots_payload(plots),
+            "marks": marks_payload(marks), "levels": lines_payload(lines),
             "trades": trades_payload(fills), "equity": equity, "stats": stats, "luck": luck,
             "split": split, "periods": periods}
 

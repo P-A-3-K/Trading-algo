@@ -158,11 +158,33 @@ class Trade:
 
 
 @dataclass
+class Mark:
+    """A point to highlight on the chart (e.g. a swing high), sized by its level."""
+    time: pd.Timestamp
+    price: float
+    kind: str = "high"             # "high" (drawn above the candle) or "low" (below)
+    level: int = 1                 # 1 = small ... 5 = most prominent
+    text: str = ""
+
+
+@dataclass
+class LevelLine:
+    """A horizontal price level from one candle to another (e.g. a swing high until it's taken)."""
+    start: pd.Timestamp
+    end: pd.Timestamp
+    price: float
+    kind: str = "high"
+    level: int = 1
+
+
+@dataclass
 class StrategyResult:
     positions: pd.Series
     plots: list = field(default_factory=list)
     params: dict = field(default_factory=dict)
     trades: Optional[list] = None     # set for trade-based strategies (self.trade)
+    marks: list = field(default_factory=list)          # self.mark(...)
+    level_lines: list = field(default_factory=list)    # self.level_line(...)
 
 
 class Strategy:
@@ -186,7 +208,7 @@ class Strategy:
         self.settings = {k: p.coerce(k, settings.get(k, p.default))
                          for k, p in self.all_params().items()}
         self.validate()
-        self._plots, self._trades = [], []
+        self._plots, self._trades, self._marks, self._level_lines = [], [], [], []
 
     # Settings read like attributes: self.fast, self.slow, ...
     def __getattr__(self, item):
@@ -232,6 +254,17 @@ class Strategy:
             raise ValueError("style must be 'line' or 'step'")
         self._plots.append(Plot(name, values, pane, color, style))
 
+    def mark(self, time, price, kind: str = "high", level: int = 1, text: str = ""):
+        """Highlight a point on the chart: a marker above ("high") or below ("low") the candle.
+        Higher levels are drawn bigger and stronger (1 = small ... 5 = most prominent)."""
+        if kind not in ("high", "low"):
+            raise ValueError("kind must be 'high' or 'low'")
+        self._marks.append(Mark(time, float(price), kind, int(level), text))
+
+    def level_line(self, start, end, price, kind: str = "high", level: int = 1):
+        """Draw a horizontal level from candle `start` to candle `end` (thicker for higher levels)."""
+        self._level_lines.append(LevelLine(start, end, float(price), kind, int(level)))
+
     def trade(self, entry_date, entry_price, side, size=1.0, exit_date=None, exit_price=None,
               stop=None, target=None, exit_reason=""):
         """Record a trade with exact prices (for strategies with stops/targets).
@@ -251,7 +284,7 @@ class Strategy:
 
     def run(self, bars: pd.DataFrame) -> StrategyResult:
         """Compute positions and plots, and check the output is usable."""
-        self._plots, self._trades = [], []
+        self._plots, self._trades, self._marks, self._level_lines = [], [], [], []
         positions = self.compute(bars)
         trades = None
         if self._trades or positions is None:
@@ -276,7 +309,7 @@ class Strategy:
         if (positions.abs() > 1 + 1e-9).any():
             raise ValueError(f"{self.name}: positions must be between -1 and 1")
         return StrategyResult(positions.rename(self.name), list(self._plots),
-                              dict(self.settings), trades)
+                              dict(self.settings), trades, list(self._marks), list(self._level_lines))
 
     # ---- Day trading (built-in "flat_at_close" setting) -----------------------------
     def day_trading(self, bars: pd.DataFrame) -> bool:

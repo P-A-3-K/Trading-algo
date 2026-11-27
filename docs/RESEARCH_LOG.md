@@ -29,6 +29,20 @@ cost per trade. The unknown that decides it is **real slippage** of stop orders.
 **Infrastructure that is ready:** MT5 data + costs, edge finders, prop simulation, live Python
 trader, MQL5 EA (compiled OK on the user's PC, verified in Strategy Tester, matches QuantLab).
 
+**New research direction (2026-11-27): swing structure + AI.** The user's idea: find ranges
+the way a trader's eye does, and learn when a pullback continues. Plan:
+1. ~~Swing structure on the chart~~ done: strategy "Swing structure (levels)"
+   (`strategies/swing_structure.py`). Level 1 = every 3-candle swing; level k+1 = the same rule
+   applied to level-k swings; a swing is "taken" when a later candle trades beyond it; each
+   swing also records when it became KNOWN in real time (level 1: next candle; level k: when the
+   next level-(k-1) swing on its right is confirmed). `swing_table()` gives all of it as a table.
+2. Next: event table. Up range = last active prominent swing low -> highest high since; event =
+   first return to 50% while the low is unbroken; outcome = high first or low first (1:1 bet,
+   50% baseline, target = half the impulse so costs are tiny relative to it). Record features
+   (level, impulse size vs ATR, speeds, volume, higher-timeframe trend, time of day).
+3. Base rates 2017-24 vs 2025+ before any AI; then logistic regression / gradient boosting
+   trained on 2017-24, judged on 2025+.
+
 ---
 
 ## Key findings (the lessons)
@@ -139,6 +153,8 @@ sizing and the 15:58 flatten all verified in the journal.
 - MT5 loading now falls back to saved candles when the connected broker doesn't know the
   symbol (e.g. DE40 saved from MetaQuotes while logged into FTMO).
 - EA: automatic magic number is unique per symbol, so several charts can run at once.
+- Chart lines with gaps (e.g. a stop-loss line between trades) were joined by a slanted line:
+  Lightweight Charts 5 joins across empty points. Now the connecting piece is transparent.
 
 ## How to run things (user's PC, PowerShell, in the repo folder)
 - Update: `git pull`. App: `start.bat`.

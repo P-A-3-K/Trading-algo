@@ -233,6 +233,7 @@ footer a { color: inherit; }
       <span class="sep" aria-hidden="true"></span>
       <button type="button" id="log" aria-pressed="false" title="Logarithmic price scale: equal % moves look equal">Log</button>
       <button type="button" id="tradesBtn" aria-pressed="true" title="Show or hide buy/sell arrows" hidden>Trades</button>
+      <button type="button" id="swingsBtn" aria-pressed="true" title="Show or hide swing markers and level lines" hidden>Swings</button>
     </div>
   </header>
   <div class="stage">
@@ -312,6 +313,16 @@ chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
 // Strategy lines: "price" pane draws over the candles, "lower" in a panel below
 const PALETTE = ["--l1", "--l2", "--l3", "--l4"];
+// The chart library joins a line across empty points; to show a gap, the piece of line that
+// starts at the point before it is made transparent (a point's color applies from it onwards)
+const gapped = pts => {
+  const out = [];
+  pts.forEach(pt => {
+    if (pt.value === undefined) { if (out.length) out[out.length - 1] = { ...out[out.length - 1], color: "transparent" }; }
+    else out.push(pt);
+  });
+  return out;
+};
 const plots = (DATA.plots || []).map((p, i) => {
   const pane = p.pane === "lower" ? 1 : 0;
   const series = chart.addSeries(LW.LineSeries, {
@@ -320,7 +331,7 @@ const plots = (DATA.plots || []).map((p, i) => {
     priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: pane === 0,
     lineType: p.style === "step" ? LW.LineType.WithSteps : LW.LineType.Simple,
   }, pane);
-  series.setData(p.points);
+  series.setData(gapped(p.points));
   return { ...p, series, token: PALETTE[i % PALETTE.length],
            byTime: new Map(p.points.map(pt => [pt.time, pt.value])) };
 });
@@ -341,11 +352,77 @@ let showTrades = true;
 const splitMark = () => DATA.split ? [{ time: DATA.split.time, position: "aboveBar", shape: "arrowDown",
   color: css("--warn"), size: 1.5, text: "test starts" }] : [];
 const markerOrder = (a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0);
+// Highlighted points (e.g. swing highs/lows): bigger and stronger for higher levels
+const barTimes = new Set(bars.map(b => b.time));
+const swingMarks = (DATA.marks || []).filter(m => barTimes.has(m.time));
+let showSwings = true;
+const LEVEL_TOKEN = ["--muted", "--l1", "--l2", "--l3", "--l4"];
+const levelColor = lv => css(LEVEL_TOKEN[Math.min(lv, LEVEL_TOKEN.length) - 1]);
+const LEVEL_SIZE = [0.4, 0.9, 1.5, 2.1, 2.6];
+function swingMarkers() {
+  if (!showSwings) return [];
+  return swingMarks.map(m => ({
+    time: m.time, position: m.kind === "high" ? "aboveBar" : "belowBar",
+    shape: m.level <= 1 ? "circle" : (m.kind === "high" ? "arrowDown" : "arrowUp"),
+    color: levelColor(m.level), size: LEVEL_SIZE[Math.min(m.level, LEVEL_SIZE.length) - 1],
+    text: m.text || undefined }));
+}
 function drawMarkers() {
   markers.setMarkers((!showTrades ? [] : fills.map(f => ({
     time: f.time, position: SIDES[f.side].pos, price: f.price,
     shape: SIDES[f.side].shape, color: css(SIDES[f.side].token), size: 2,
-    text: fills.length <= 300 ? SIDES[f.side].label : undefined }))).concat(splitMark()).sort(markerOrder));
+    text: fills.length <= 300 ? SIDES[f.side].label : undefined }))).concat(splitMark(), swingMarkers()).sort(markerOrder));
+}
+// Horizontal levels (e.g. a swing high until it's taken): lines packed into a few series ("lanes")
+const levelSeries = [];
+(function drawLevels() {
+  const lv = DATA.levels || [];
+  if (!lv.length) return;
+  const times = bars.map(b => b.time);
+  const at = t => {                                   // first bar at or after time t
+    let lo = 0, hi = times.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < t) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+  const MAX_SERIES = 80;
+  const byLevel = {};
+  lv.forEach(l => { (byLevel[l.level] = byLevel[l.level] || []).push(l); });
+  Object.keys(byLevel).map(Number).sort((a, b) => b - a).forEach(level => {   // important levels first
+    const lanes = [];                                 // each lane: {end: last bar index, points: []}
+    byLevel[level].map(l => ({ ...l, i0: at(l.t0), i1: Math.min(at(l.t1), times.length - 1) }))
+      .filter(l => l.i1 >= 0 && l.i0 < times.length && l.i1 >= l.i0)
+      .sort((a, b) => a.i0 - b.i0)
+      .forEach(l => {
+        let lane = lanes.find(z => z.end + 1 < l.i0);
+        if (!lane) {
+          if (levelSeries.length + lanes.length >= MAX_SERIES) return;
+          lane = { end: -1, points: [] }; lanes.push(lane);
+        }
+        lane.points.push({ time: times[l.i0], value: l.price }, { time: times[l.i1], value: l.price });
+        if (l.i1 + 1 < times.length) lane.points.push({ time: times[l.i1 + 1] });   // gap: end of this line
+        lane.end = l.i1 + 1;
+      });
+    lanes.forEach(z => {
+      const series = chart.addSeries(LW.LineSeries, {
+        lineWidth: Math.min(4, Math.max(1, level - 1)), lineStyle: level <= 2 ? LW.LineStyle.Dashed : LW.LineStyle.Solid,
+        priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => null,              // old levels far away don't squash the chart
+      });
+      series.setData(gapped(z.points.filter((p, k, a) => k === 0 || p.time !== a[k - 1].time)));
+      levelSeries.push({ series, level });
+    });
+  });
+})();
+const swingsBtn = document.getElementById("swingsBtn");
+if (swingMarks.length || levelSeries.length) {
+  swingsBtn.hidden = false;
+  swingsBtn.textContent = `Swings (${swingMarks.length.toLocaleString()})`;
+  swingsBtn.addEventListener("click", () => {
+    showSwings = !showSwings;
+    swingsBtn.setAttribute("aria-pressed", String(showSwings));
+    levelSeries.forEach(z => z.series.applyOptions({ visible: showSwings }));
+    drawMarkers();
+  });
 }
 const tradesBtn = document.getElementById("tradesBtn");
 if (fills.length) {
@@ -376,6 +453,7 @@ function paint() {
   const vu = css("--vol-up"), vd = css("--vol-down");
   volume.setData(bars.map(b => ({ time: b.time, value: b.volume, color: b.close >= b.open ? vu : vd })));
   plots.forEach(p => p.series.applyOptions({ color: p.color || css(p.token) }));
+  if (typeof levelSeries !== "undefined") levelSeries.forEach(z => z.series.applyOptions({ color: levelColor(z.level) }));
   if (typeof drawMarkers === "function") drawMarkers();
 }
 candles.setData(bars.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })));
