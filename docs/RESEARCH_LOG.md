@@ -21,6 +21,8 @@ cost per trade. The unknown that decides it is **real slippage** of stop orders.
    fill, slippage in bp, cost per round trip vs the backtest's assumption).
 2. Run `QuantLabORB` on an FTMO demo on GER40.cash, US100.cash, XAUUSD, all `Session = US`,
    hosted on MetaQuotes VPS (~$15/month; the user can't keep their PC on).
+   2026-11-27: started on the user's PC first (3 charts, Session US, weight 0.33, plan size 1,
+   start balance 80000) to check everything runs; VPS after that.
 3. After ~2 months (~120 trades): if real costs are at or below the "2% slippage" level, rerun
    the prop check / challenge plan on the 3-market portfolio and decide on the challenge.
 
